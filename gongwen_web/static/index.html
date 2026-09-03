@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="砚章——面向个人用户的智能公文写作工作台，支持框架生成、事实提取、质量检查和 Word 导出。"
+    />
+    <title>砚章 · 公文写作工作台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell" id="appShell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="砚章首页">
+          <span class="brand-mark" aria-hidden="true">章</span>
+          <span class="brand-copy">
+            <strong>砚章</strong>
+            <small>公文写作工作台</small>
+          </span>
+        </a>
+
+        <div class="document-state" aria-live="polite">
+          <span class="state-dot" id="saveDot"></span>
+          <span id="saveStatus">所有更改已保存</span>
+          <span class="state-divider"></span>
+          <button class="text-button" id="historyButton" type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+            版本记录
+          </button>
+          <span class="state-divider"></span>
+          <button class="text-button" id="serverDocumentsButton" type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+            服务端文稿
+          </button>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="icon-button" id="focusButton" type="button" title="专注写作" aria-label="专注写作">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
+          <button class="icon-button" id="settingsButton" type="button" title="模型设置" aria-label="模型设置">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+          </button>
+          <button class="secondary-button desktop-only" id="quickExportButton" type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 19h14"/></svg>
+            导出 Word
+          </button>
+        </div>
+      </header>
+
+      <nav class="mobile-tabs" aria-label="工作台区域">
+        <button class="mobile-tab is-active" type="button" data-mobile-panel="inputPanel">写作设置</button>
+        <button class="mobile-tab" type="button" data-mobile-panel="writingPanel">正文</button>
+        <button class="mobile-tab" type="button" data-mobile-panel="reviewPanel">质检导出</button>
+      </nav>
+
+      <main class="workspace">
+        <aside class="side-panel input-panel mobile-panel is-active" id="inputPanel" aria-label="写作输入">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">第一步</span>
+              <h2>明确写作任务</h2>
+            </div>
+            <button class="mini-button" id="loadExampleButton" type="button">填入示例</button>
+          </div>
+
+          <form id="writingForm" autocomplete="off">
+            <div class="form-row split">
+              <label class="field">
+                <span>文种</span>
+                <select id="documentType" name="document_type">
+                  <option value="通知">通知</option>
+                  <option value="请示">请示</option>
+                  <option value="报告">报告</option>
+                  <option value="函">函</option>
+                  <option value="会议纪要">会议纪要</option>
+                  <option value="工作总结">工作总结</option>
+                  <option value="实施方案" selected>实施方案</option>
+                  <option value="讲话稿">讲话稿</option>
+                  <option value="汇报材料">汇报材料</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>篇幅</span>
+                <select id="length" name="length">
+                  <option value="精简">精简 · 快速提要</option>
+                  <option value="标准" selected>标准 · 完整结构</option>
+                  <option value="详细">详细 · 深度展开</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field required-field">
+              <span>写作主题</span>
+              <input id="topic" name="topic" maxlength="120" placeholder="例如：推进数字政府建设提质增效" />
+              <small><b id="topicCount">0</b>/120</small>
+            </label>
+
+            <label class="field">
+              <span>写作目的</span>
+              <input id="purpose" name="purpose" placeholder="例如：明确年度重点任务和责任分工" />
+            </label>
+
+            <label class="field">
+              <span>阅读对象</span>
+              <input id="audience" name="audience" placeholder="例如：各处室、各直属单位" />
+            </label>
+
+            <div class="field">
+              <span>行文语气</span>
+              <div class="segmented" id="toneSelector" role="radiogroup" aria-label="行文语气">
+                <label><input type="radio" name="tone" value="严谨规范" checked /><span>严谨规范</span></label>
+                <label><input type="radio" name="tone" value="凝练有力" /><span>凝练有力</span></label>
+                <label><input type="radio" name="tone" value="务实亲切" /><span>务实亲切</span></label>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>写法参考</span>
+              <select id="referenceStyle" name="reference_style">
+                <option value="权威媒体综合写法" selected>权威媒体综合写法</option>
+                <option value="人民日报式消息评论">人民日报式消息评论</option>
+                <option value="光明日报式理性阐释">光明日报式理性阐释</option>
+                <option value="求是式理论论证">求是式理论论证</option>
+              </select>
+              <small class="field-note">仅参考结构、语气和句式特征，不复制来源正文。</small>
+            </label>
+
+            <section class="methodology-section" aria-labelledby="methodologyHeading">
+              <div class="methodology-heading">
+                <div>
+                  <span class="eyebrow">内容骨架</span>
+                  <h3 id="methodologyHeading">结构方法论</h3>
+                </div>
+                <span class="method-badge">随文种匹配</span>
+              </div>
+              <label class="field compact-field">
+                <span>选择成文路径</span>
+                <select id="contentMethodology" name="methodology_id">
+                  <option value="">正在载入适用方法……</option>
+                </select>
+              </label>
+              <p class="methodology-description" id="methodologyDescription">
+                系统会根据文种匹配章节顺序、论证逻辑与事实使用规则。
+              </p>
+              <details class="custom-methodology" id="customMethodologyDetails">
+                <summary>自定义结构公式 / 步骤</summary>
+                <div class="custom-methodology-fields">
+                  <label class="field compact-field">
+                    <span>方法名称</span>
+                    <input id="customMethodologyName" maxlength="100" placeholder="例如：形势—问题—举措—保障" />
+                  </label>
+                  <label class="field compact-field">
+                    <span>章节步骤（每行一项）</span>
+                    <textarea id="customMethodologySteps" rows="4" placeholder="分析当前形势&#10;梳理主要问题&#10;部署重点举措&#10;强化组织保障"></textarea>
+                  </label>
+                  <p class="field-note">选择“自定义结构”后，将按这里的步骤生成一级标题与正文。</p>
+                </div>
+              </details>
+            </section>
+
+            <section class="reference-picker" aria-labelledby="referencePickerTitle">
+              <div class="reference-picker-heading">
+                <div><span class="eyebrow">本地知识库</span><h3 id="referencePickerTitle">文章来源库</h3></div>
+                <button class="mini-button" id="openArticleLibraryButton" type="button">选择文章</button>
+              </div>
+              <p>文章正文保存在本机资料库；生成时仅使用短摘录与写法特征，且不作为事实依据。</p>
+              <div class="selected-references empty" id="selectedReferences">尚未选择参考文章</div>
+            </section>
+
+            <label class="field">
+              <span class="label-row">具体要求 <button class="link-button" id="clearRequirements" type="button">清空</button></span>
+              <textarea id="requirements" name="requirements" rows="4" placeholder="需要强调的重点、结构、时间范围，或必须保留的表述……"></textarea>
+            </label>
+
+            <div class="section-divider"><span>参考材料</span></div>
+
+            <label class="field material-field">
+              <span class="label-row">
+                粘贴原始材料
+                <span class="help-tip" data-tip="材料仅保存在当前浏览器，发送模型时将随本次请求提交。">?</span>
+              </span>
+              <textarea id="materials" name="materials" rows="7" placeholder="粘贴会议记录、政策要点、历史文稿或数据材料。内容越具体，生成结果越可靠。"></textarea>
+              <span class="textarea-footer"><b id="materialCount">0</b> 字</span>
+            </label>
+
+            <div class="material-actions">
+              <input id="materialFile" type="file" accept=".txt,.md,.csv,.json" hidden />
+              <button class="upload-button" id="uploadMaterialButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+                导入文本材料
+              </button>
+              <span id="materialFileName">支持 TXT / MD / CSV</span>
+            </div>
+
+            <section class="fact-card" aria-labelledby="factCardTitle">
+              <div class="fact-card-heading">
+                <div>
+                  <span class="eyebrow">写作护栏</span>
+                  <h3 id="factCardTitle">事实卡</h3>
+                </div>
+                <button class="icon-button small" id="extractFactsButton" type="button" title="重新提取事实" aria-label="重新提取事实">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7L20 14"/><path d="M20 8v6h-6"/></svg>
+                </button>
+              </div>
+              <p class="fact-hint" id="factHint">粘贴材料后，将自动识别时间、数字、机构和任务。</p>
+              <div class="fact-groups" id="factGroups"></div>
+              <label class="fact-lock">
+                <input id="factLock" type="checkbox" checked />
+                <span>生成时严格依据事实卡，不补造数据</span>
+              </label>
+            </section>
+          </form>
+        </aside>
+
+        <section class="writing-panel mobile-panel" id="writingPanel" aria-label="文稿编辑">
+          <div class="writer-toolbar">
+            <div class="writer-status">
+              <span class="document-badge" id="documentBadge">实施方案</span>
+              <span id="wordCount">0 字</span>
+              <span>预计阅读 <b id="readingTime">1</b> 分钟</span>
+            </div>
+            <div class="writer-actions">
+              <button class="toolbar-button" id="undoButton" type="button" title="撤销" aria-label="撤销">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 8-5 4 5 4"/><path d="M5 12h8a6 6 0 0 1 6 6"/></svg>
+              </button>
+              <button class="toolbar-button" id="redoButton" type="button" title="重做" aria-label="重做">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 8 5 4-5 4"/><path d="M19 12h-8a6 6 0 0 0-6 6"/></svg>
+              </button>
+              <span class="toolbar-divider"></span>
+              <button class="toolbar-button" type="button" data-format="bold" title="加粗"><b>加</b></button>
+              <button class="toolbar-button" type="button" data-format="formatBlock" data-value="h2" title="二级标题">标题</button>
+              <button class="toolbar-button" type="button" data-format="insertUnorderedList" title="项目符号">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+              </button>
+              <span class="toolbar-divider"></span>
+              <button class="toolbar-button with-label regenerate-button" id="regenerateButton" type="button" title="按当前写作设置重新生成全文">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7L20 14"/><path d="M20 8v6h-6"/></svg>
+                重新生成
+              </button>
+              <button class="toolbar-button with-label" id="serverLibraryButton" type="button" title="保存或打开服务端文稿">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                文稿库
+              </button>
+              <button class="toolbar-button with-label" id="copyButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+                复制全文
+              </button>
+              <button class="toolbar-button with-label" id="insertFieldButton" type="button" title="插入可批量替换的 Word 域">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM9 9h6M9 13h4"/></svg>
+                插入域
+              </button>
+            </div>
+          </div>
+
+          <section class="title-studio title-workbench" id="titleWorkbench" aria-labelledby="titleStudioHeading">
+            <div class="section-header-row title-workbench-heading">
+              <div>
+                <span class="eyebrow">核心工作台</span>
+                <h2 id="titleStudioHeading">标题实验室</h2>
+                <p>选公式、批量生成、量化评分，采用后再生成正文。</p>
+              </div>
+              <button class="link-button" id="refreshTitlesButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7L20 14"/><path d="M20 8v6h-6"/></svg>
+                更新一组
+              </button>
+            </div>
+
+            <div class="formula-heading">
+              <div><h3>标题公式</h3><p>可多选，系统将按适配度生成并去重。</p></div>
+              <label class="inline-select"><span>数量</span><select id="titleCount"><option value="3">3 个</option><option value="5" selected>5 个</option><option value="8">8 个</option><option value="10">10 个</option></select></label>
+            </div>
+            <div class="title-formula-list" id="titleFormulaOptions" aria-live="polite">
+              <p class="formula-empty">正在载入当前文种的标题公式……</p>
+            </div>
+
+            <details class="custom-title-formula" id="customTitleFormulaDetails">
+              <summary>自定义标题公式</summary>
+              <div class="custom-title-formula-fields">
+                <label class="field compact-field"><span>公式名称</span><input id="customTitleFormulaName" maxlength="100" placeholder="例如：双句行动式" /></label>
+                <label class="field compact-field"><span>标题模板</span><input id="customTitleFormulaTemplate" maxlength="300" placeholder="例如：聚焦{topic}，推动{purpose}" /></label>
+                <label class="field compact-field"><span>使用说明</span><input id="customTitleFormulaRule" maxlength="500" placeholder="说明适用场景；支持 {topic}、{document_type}、{purpose}、{audience}" /></label>
+              </div>
+            </details>
+
+            <div class="title-generation-bar">
+              <div class="title-candidate-state">
+                <strong id="titleCandidateSummary">尚未生成标题</strong>
+                <span>候选将按综合评分由高到低排列</span>
+              </div>
+              <label class="inline-select"><span>排序</span><select id="titleSort"><option value="score">综合评分</option><option value="compliance">文种规范</option><option value="relevance">主题相关</option><option value="concision">简洁凝练</option></select></label>
+              <button class="primary-button" id="generateTitlesButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 1.4 4.3a2 2 0 0 0 1.3 1.3L19 10l-4.3 1.4a2 2 0 0 0-1.3 1.3L12 17l-1.4-4.3a2 2 0 0 0-1.3-1.3L5 10l4.3-1.4a2 2 0 0 0 1.3-1.3L12 3Z"/></svg>
+                独立生成标题
+              </button>
+            </div>
+            <div class="title-candidates is-empty" id="titleCandidates">
+              <div class="title-empty"><b>先定好题，再写正文</b><span>填写左侧写作主题，然后在这里单独生成标题方案。</span></div>
+            </div>
+          </section>
+
+          <div class="generation-hero" id="generationHero">
+            <span class="seal-illustration" aria-hidden="true">文</span>
+            <h1>从材料到成稿，先搭好每一层结构</h1>
+            <p>填写左侧主题和参考材料，砚章将依次生成标题、提纲与正文，并检查事实一致性。</p>
+            <button class="primary-button large" id="generateButton" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 1.4 4.3a2 2 0 0 0 1.3 1.3L19 10l-4.3 1.4a2 2 0 0 0-1.3 1.3L12 17l-1.4-4.3a2 2 0 0 0-1.3-1.3L5 10l4.3-1.4a2 2 0 0 0 1.3-1.3L12 3Z"/><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z"/></svg>
+              生成公文初稿
+              <span class="shortcut-hint">⌘ ↵</span>
+            </button>
+          </div>
+
+          <div class="document-workspace is-hidden" id="documentWorkspace">
+            <div class="document-layout">
+              <nav class="outline-rail" id="outlineRail" aria-label="文章提纲">
+                <div class="outline-heading">
+                  <span>文章提纲</span>
+                  <button class="icon-button small" id="collapseOutlineButton" type="button" title="收起提纲" aria-label="收起提纲">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+                  </button>
+                </div>
+                <ol id="outlineList"></ol>
+                <button class="add-outline-button" id="addSectionButton" type="button">＋ 添加章节</button>
+              </nav>
+
+              <article class="paper-wrap">
+                <div class="paper" id="paper">
+                  <div class="paper-meta">
+                    <span id="paperType">实施方案</span>
+                    <span>草稿</span>
+                  </div>
+                  <textarea class="paper-title" id="documentTitle" rows="2" aria-label="公文标题" placeholder="在此输入标题"></textarea>
+                  <div
+                    class="paper-body"
+                    id="documentEditor"
+                    contenteditable="true"
+                    role="textbox"
+                    aria-multiline="true"
+                    data-placeholder="正文将在这里生成，你也可以直接开始写作……"
+                    spellcheck="false"
+                  ></div>
+                  <div class="paper-footer">
+                    <span>砚章 · 个人草稿</span>
+                    <span>第 1 页</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文本操作">
+            <button type="button" data-rewrite-mode="polish">润色</button>
+            <button type="button" data-rewrite-mode="concise">精简</button>
+            <button type="button" data-rewrite-mode="expand">扩写</button>
+            <button type="button" data-rewrite-mode="formal">更规范</button>
+            <button type="button" id="customRewriteButton">自定义</button>
+          </div>
+        </section>
+
+        <aside class="side-panel review-panel mobile-panel" id="reviewPanel" aria-label="质检与导出">
+          <div class="panel-tabs" role="tablist" aria-label="右侧工具">
+            <button class="panel-tab is-active" id="reviewTab" type="button" role="tab" aria-selected="true" data-tab-panel="qualityPanel">质量检查</button>
+            <button class="panel-tab" id="templateTab" type="button" role="tab" aria-selected="false" data-tab-panel="templatePanel">模板导出</button>
+          </div>
+
+          <section class="tab-content is-active" id="qualityPanel" role="tabpanel" aria-labelledby="reviewTab">
+            <div class="quality-summary">
+              <div class="score-ring" id="scoreRing" style="--score: 0">
+                <div><strong id="qualityScore">—</strong><small>综合评分</small></div>
+              </div>
+              <div class="quality-copy">
+                <h2 id="qualityTitle">等待检查</h2>
+                <p id="qualitySummary">生成或输入正文后，运行一次完整质量检查。</p>
+              </div>
+            </div>
+
+            <button class="secondary-button full-width" id="reviewButton" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 12 2 2 4-5"/><circle cx="12" cy="12" r="9"/></svg>
+              运行质量检查
+            </button>
+
+            <div class="quality-metrics" id="qualityMetrics">
+              <div><span>格式规范</span><b>待检</b></div>
+              <div><span>结构完整</span><b>待检</b></div>
+              <div><span>事实一致</span><b>待检</b></div>
+              <div><span>语言精炼</span><b>待检</b></div>
+            </div>
+
+            <details class="fact-evidence" id="factEvidence" open>
+              <summary>
+                <span>事实溯源</span>
+                <b id="factCoverage">待检</b>
+              </summary>
+              <p id="factAuditSummary">检查后将逐句标注材料依据、部分匹配和未核验陈述。</p>
+              <div class="fact-evidence-list" id="factEvidenceList"></div>
+            </details>
+
+            <div class="issues-heading">
+              <h3>修改建议</h3>
+              <span id="issueCount">0 条</span>
+            </div>
+            <div class="issues-list empty" id="issuesList">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 3h8l4 4v14H4V3h4Z"/><path d="M8 11h8M8 15h6"/></svg>
+              <p>这里会展示用词、结构、格式和事实方面的建议。</p>
+            </div>
+
+            <details class="checklist" open>
+              <summary>快速自检清单 <span id="checkProgress">0/6</span></summary>
+              <label><input type="checkbox" /> 文种和行文关系正确</label>
+              <label><input type="checkbox" /> 标题准确概括正文</label>
+              <label><input type="checkbox" /> 事实、数字均有材料依据</label>
+              <label><input type="checkbox" /> 各级标题结构平行</label>
+              <label><input type="checkbox" /> 任务包含责任与时限</label>
+              <label><input type="checkbox" /> 已完成人工复核</label>
+            </details>
+          </section>
+
+          <section class="tab-content" id="templatePanel" role="tabpanel" aria-labelledby="templateTab" hidden>
+            <div class="template-heading">
+              <span class="eyebrow">交付文件</span>
+              <h2>选择 Word 版式</h2>
+              <p>导出后仍可在 Word 或 WPS 中继续编辑；<code>{{变量}}</code> 会生成真实 Word 域。</p>
+            </div>
+
+            <div class="template-list" id="templateList">
+              <label class="template-option is-selected">
+                <input type="radio" name="template" value="standard" checked />
+                <span class="template-preview"><i></i><i></i><i></i><i></i></span>
+                <span><strong>规范公文工作稿</strong><small>A4 · 标准字号 · 规范层级</small></span>
+                <b>✓</b>
+              </label>
+              <label class="template-option">
+                <input type="radio" name="template" value="brief" />
+                <span class="template-preview clean"><i></i><i></i><i></i></span>
+                <span><strong>简洁材料版式</strong><small>A4 · 汇报与讲话材料</small></span>
+                <b>✓</b>
+              </label>
+            </div>
+
+            <div class="export-meta">
+              <label class="field"><span>发文单位（选填）</span><input id="issuingOrg" placeholder="××单位" /></label>
+              <label class="field"><span>成文日期</span><input id="issueDate" type="date" /></label>
+            </div>
+
+            <div class="export-actions">
+              <button class="primary-button full-width" id="exportDocxButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v5h5M3 8l2 8 2-5 2 5 2-8"/></svg>
+                导出为 Word
+              </button>
+              <button class="secondary-button full-width" id="batchExportButton" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+                批量套用变量
+              </button>
+              <button class="ghost-button full-width" id="printButton" type="button">打印 / 存为 PDF</button>
+            </div>
+
+            <div class="export-note">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+              <p>文稿可保存到本机服务端数据库；Word 文件仍由当前浏览器直接下载。</p>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <span><i class="connection-dot" id="connectionDot"></i><b id="connectionLabel">本地模式</b></span>
+        <span>自动保存已开启</span>
+        <span class="statusbar-spacer"></span>
+        <span id="providerLabel">演示引擎</span>
+        <button class="text-button" id="footerSettingsButton" type="button">切换模型</button>
+      </footer>
+    </div>
+
+    <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+    <aside class="settings-drawer" id="settingsDrawer" aria-labelledby="settingsTitle" aria-hidden="true">
+      <div class="drawer-header">
+        <div><span class="eyebrow">连接设置</span><h2 id="settingsTitle">模型与 API</h2></div>
+        <button class="icon-button" data-close-drawer type="button" aria-label="关闭设置">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <div class="mode-cards">
+          <label class="mode-card is-selected">
+            <input type="radio" name="engineMode" value="demo" checked />
+            <span class="mode-icon">演</span>
+            <span><strong>本地演示</strong><small>无需密钥，体验完整流程</small></span>
+            <b>✓</b>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="engineMode" value="api" />
+            <span class="mode-icon">AI</span>
+            <span><strong>连接模型 API</strong><small>使用你自己的兼容接口</small></span>
+            <b>✓</b>
+          </label>
+        </div>
+
+        <div id="apiSettings" class="api-settings is-disabled">
+          <label class="field"><span>服务商</span><select id="providerName"><option value="openai">OpenAI 兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="custom">自定义</option></select></label>
+          <label class="field"><span>接口地址</span><input id="baseUrl" type="url" placeholder="https://api.example.com/v1" /></label>
+          <label class="field"><span>模型名称</span><input id="modelName" placeholder="例如：MODEL_NAME" /></label>
+          <label class="field">
+            <span>API 密钥</span>
+            <span class="password-field"><input id="apiKey" type="password" placeholder="仅保存在当前页面，关闭后清除" /><button id="toggleApiKey" type="button">显示</button></span>
+          </label>
+          <button class="secondary-button full-width" id="testProviderButton" type="button">测试模型连接</button>
+          <p class="connection-test" id="providerTestStatus">保存前可先验证接口、模型和密钥。</p>
+        </div>
+
+        <div class="deployment-setting" id="serverProviderCard" hidden>
+          <span class="deployment-setting-icon" aria-hidden="true">AI</span>
+          <div>
+            <strong>服务端模型已就绪</strong>
+            <p>部署环境已经保存模型连接信息，选择“连接模型 API”即可使用；页面无需填写密钥。</p>
+          </div>
+        </div>
+
+        <div class="deployment-setting" id="accessSettings" hidden>
+          <span class="deployment-setting-icon" aria-hidden="true">钥</span>
+          <div>
+            <strong>访问保护已开启</strong>
+            <p>访问令牌只保存在当前浏览器会话，关闭浏览器后自动清除。</p>
+            <button class="link-button" id="accessTokenSettingsButton" type="button">更换访问令牌</button>
+          </div>
+        </div>
+
+        <div class="privacy-card">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.8 8.3 7 10 4.2-1.7 7-5.2 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg>
+          <div><strong>本机分层保存</strong><p>写作草稿与快速快照保存在浏览器；“文稿库”和文章来源保存在本机 SQLite。页面临时填写的 API 密钥仅停留在当前页面内存，服务端密钥保存在部署环境中。连接外部模型时，当前任务内容会发送至所配接口。</p></div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="ghost-button" data-close-drawer type="button">取消</button>
+        <button class="primary-button" id="saveSettingsButton" type="button">保存设置</button>
+      </div>
+    </aside>
+
+    <dialog class="modal access-modal" id="accessModal">
+      <form class="modal-card compact access-card" id="accessForm">
+        <div class="access-mark" aria-hidden="true">章</div>
+        <div class="access-heading">
+          <span class="eyebrow">受保护的个人工作台</span>
+          <h2>进入砚章</h2>
+          <p>请输入部署时设置的访问令牌。令牌仅保存在当前浏览器会话。</p>
+        </div>
+        <label class="field">
+          <span>访问令牌</span>
+          <input id="accessToken" type="password" autocomplete="current-password" autofocus />
+        </label>
+        <p class="connection-test" id="accessError" role="alert">请输入访问令牌后继续。</p>
+        <button class="primary-button full-width" id="unlockAppButton" type="submit">进入工作台</button>
+      </form>
+    </dialog>
+
+    <aside class="history-drawer" id="historyDrawer" aria-labelledby="historyTitle" aria-hidden="true">
+      <div class="drawer-header">
+        <div><span class="eyebrow">本地快照</span><h2 id="historyTitle">版本记录</h2></div>
+        <button class="icon-button" data-close-history type="button" aria-label="关闭版本记录">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="history-actions">
+        <p>重要修改会自动保存快照，也可以手动创建版本。</p>
+        <button class="secondary-button full-width" id="createSnapshotButton" type="button">＋ 保存当前版本</button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </aside>
+
+    <dialog class="modal library-modal" id="articleLibraryModal">
+      <form method="dialog" class="modal-card library-card">
+        <div class="modal-header">
+          <div><span class="eyebrow">写法参考</span><h2>文章来源库</h2><p>文章内容与事实材料分开管理，只提炼标题结构、论证层次和句式特征。</p></div>
+          <button class="icon-button" value="cancel" aria-label="关闭文章来源库"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="modal-body library-grid">
+          <section class="library-browser">
+            <section class="article-collector" aria-labelledby="collectorHeading">
+              <div class="collector-heading">
+                <div>
+                  <span class="eyebrow">按范围采集</span>
+                  <h3 id="collectorHeading">从官方网站发现文章</h3>
+                  <p>按关键词、来源和日期范围检索，符合范围的结果自动写入本机文章来源库，可在下方查看逐项状态。</p>
+                </div>
+                <span class="collector-badge">有界任务</span>
+              </div>
+              <div class="collector-form">
+                <label class="field compact-field"><span>关键词（逗号或换行分隔）</span><input id="collectKeywords" maxlength="500" placeholder="例如：数字政府，基层治理，营商环境" /></label>
+                <div class="collector-sources" role="group" aria-label="采集文章来源">
+                  <label id="peopleCollectSourceLabel" title="该来源的自动检索默认关闭"><input type="checkbox" name="collectSource" value="people" disabled /> 人民网</label>
+                  <label><input type="checkbox" name="collectSource" value="gmw" checked /> 光明网</label>
+                  <label><input type="checkbox" name="collectSource" value="qiushi" checked /> 求是网</label>
+                </div>
+                <p class="collector-status" id="peopleSearchNotice">人民网自动检索默认关闭；仍可在右侧手工导入 HTTPS 文章链接。</p>
+                <div class="collector-grid">
+                  <label class="field compact-field"><span>开始日期</span><input id="collectStartDate" type="date" /></label>
+                  <label class="field compact-field"><span>结束日期</span><input id="collectEndDate" type="date" /></label>
+                  <label class="field compact-field"><span>数量上限</span><select id="collectLimit"><option value="10">10 篇</option><option value="20" selected>20 篇</option><option value="50">50 篇</option><option value="100">100 篇</option></select></label>
+                </div>
+                <div class="collector-actions">
+                  <span class="collector-status" id="collectionStatus">等待设置采集范围</span>
+                  <button class="primary-button" id="collectArticlesButton" type="button">开始采集</button>
+                </div>
+              </div>
+              <div class="collector-results" id="collectionResults" aria-live="polite"></div>
+            </section>
+            <div class="library-search">
+              <input id="articleSearch" type="search" placeholder="搜索标题、摘要或写法特征" />
+              <select id="articleSourceFilter" aria-label="来源筛选">
+                <option value="">全部来源</option>
+                <option value="people">人民日报 / 人民网</option>
+                <option value="gmw">光明日报 / 光明网</option>
+                <option value="qiushi">求是 / 求是网</option>
+                <option value="manual">用户导入</option>
+              </select>
+              <button class="secondary-button" id="searchArticlesButton" type="button">检索</button>
+            </div>
+            <div class="article-list" id="articleList"><p class="library-empty">文章来源库为空，可在右侧添加。</p></div>
+          </section>
+          <section class="article-import">
+            <div><span class="eyebrow">添加资料</span><h3>导入公开文章</h3><p>可粘贴正文，也可显式输入官方网站文章链接。</p></div>
+            <div class="form-row split">
+              <label class="field"><span>来源</span><select id="articleSource"><option value="people">人民日报 / 人民网</option><option value="gmw">光明日报 / 光明网</option><option value="qiushi">求是 / 求是网</option><option value="manual" selected>用户导入</option></select></label>
+              <label class="field"><span>发布日期</span><input id="articleDate" type="date" /></label>
+            </div>
+            <label class="field"><span>文章标题</span><input id="articleTitle" maxlength="300" placeholder="粘贴导入时填写" /></label>
+            <label class="field"><span>文章链接</span><input id="articleUrl" type="url" placeholder="https://www.people.com.cn/..." /></label>
+            <button class="secondary-button full-width" id="importArticleUrlButton" type="button">从官方网站链接读取</button>
+            <label class="field"><span>文章正文</span><textarea id="articleContent" rows="7" placeholder="粘贴需要纳入个人参考库的文章正文"></textarea></label>
+            <button class="primary-button full-width" id="saveArticleButton" type="button">保存到文章来源库</button>
+          </section>
+        </div>
+        <div class="modal-footer">
+          <span id="selectedArticleCount">已选择 0 篇</span>
+          <button class="primary-button" value="cancel">完成选择</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal documents-modal" id="serverDocumentsModal">
+      <form method="dialog" class="modal-card compact documents-card">
+        <div class="modal-header">
+          <div><span class="eyebrow">服务端存储</span><h2>我的文稿库</h2><p>保存在本机 SQLite 中，每次更新都会建立版本。</p></div>
+          <button class="icon-button" value="cancel" aria-label="关闭文稿库"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <button class="primary-button full-width" id="saveServerDocumentButton" type="button">保存当前文稿到服务端</button>
+          <div class="server-document-list" id="serverDocumentList"><p class="library-empty">正在读取文稿……</p></div>
+        </div>
+        <div class="modal-footer"><span id="serverDocumentStatus">尚未保存到服务端</span><button class="ghost-button" value="cancel">关闭</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal batch-modal" id="batchModal">
+      <form method="dialog" class="modal-card" id="batchForm">
+        <div class="modal-header">
+          <div><span class="eyebrow">Word 批量生成</span><h2>批量套用变量</h2><p>把表格中的每一行数据生成一份独立文稿。</p></div>
+          <button class="icon-button" value="cancel" aria-label="关闭">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <div class="batch-steps" aria-label="批量生成步骤">
+          <span class="is-active">1. 设置变量</span><i></i><span>2. 检查数据</span><i></i><span>3. 下载文件</span>
+        </div>
+        <div class="modal-body">
+          <div class="batch-grid">
+            <section>
+              <div class="section-header-row"><h3>文稿变量</h3><button class="link-button" id="detectVariablesButton" type="button">重新识别</button></div>
+              <p class="muted">在标题或正文中使用双花括号，例如 <code>{{单位}}</code>、<code>{{日期}}</code>。</p>
+              <div class="variable-chips" id="variableChips"><span>单位</span><span>日期</span></div>
+              <label class="field"><span>批量数据（CSV）</span><textarea id="batchCsv" rows="9" placeholder="单位,日期\n第一单位,2026年9月3日\n第二单位,2026年9月4日"></textarea></label>
+              <div class="material-actions">
+                <input id="batchFile" type="file" accept=".csv,.txt" hidden />
+                <button class="upload-button" id="uploadBatchButton" type="button">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+                  上传 CSV
+                </button>
+              </div>
+            </section>
+            <section>
+              <div class="section-header-row"><h3>数据预览</h3><span class="data-count" id="batchRowCount">0 行</span></div>
+              <div class="table-wrap"><table id="batchPreview"><thead></thead><tbody></tbody></table><div class="table-empty" id="batchEmpty">粘贴或上传 CSV 后在此预览</div></div>
+              <label class="field"><span>文件包名称</span><input id="batchFilename" value="公文批量文件" /></label>
+            </section>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span id="batchValidation">请先填写批量数据</span>
+          <button class="ghost-button" value="cancel">取消</button>
+          <button class="primary-button" id="generateBatchButton" type="button" disabled>生成 Word 文件包</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal rewrite-modal" id="rewriteModal">
+      <form method="dialog" class="modal-card compact" id="rewriteForm">
+        <div class="modal-header">
+          <div><span class="eyebrow">局部改写</span><h2>希望如何修改？</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <div class="selected-preview" id="selectedPreview"></div>
+          <label class="field"><span>修改要求</span><textarea id="rewriteInstruction" rows="4" placeholder="例如：保留数字不变，改得更简练有力"></textarea></label>
+        </div>
+        <div class="modal-footer"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="submitRewriteButton" type="button">开始改写</button></div>
+      </form>
+    </dialog>
+
+    <div class="loading-overlay" id="loadingOverlay" hidden>
+      <div class="loading-card">
+        <span class="ink-loader"><i></i><i></i><i></i></span>
+        <strong id="loadingTitle">正在起草文稿</strong>
+        <p id="loadingMessage">梳理事实材料，搭建标题与段落结构……</p>
+        <div class="progress-track"><span id="loadingProgress"></span></div>
+      </div>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  </body>
+</html>

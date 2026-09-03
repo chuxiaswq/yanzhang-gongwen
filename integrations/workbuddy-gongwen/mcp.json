@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "gongwen-writing": {
+      "type": "streamableHttp",
+      "url": "https://DOMAIN/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GONGWEN_MCP_ACCESS_TOKEN}"
+      },
+      "timeout": 300000
+    }
+  }
+}

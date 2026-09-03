@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yanzhang-gongwen"
+version = "0.1.0b1"
+description = "砚章：带 Web 界面、文章来源库和 MCP 服务的个人公文写作预览版"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Yanzhang Contributors" }]
+keywords = ["mcp", "official-document", "writing", "chinese", "web"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business",
+]
+dependencies = [
+  "cryptography>=43,<51",
+  "httpx>=0.27,<1",
+  "mcp>=1.29,<2",
+  "pydantic>=2.9,<3",
+  "starlette>=0.47,<2",
+  "tzdata>=2025.2; platform_system == 'Windows'",
+  "uvicorn>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "respx>=0.21,<1",
+  "ruff>=0.6,<1",
+]
+
+[project.scripts]
+gongwen-mcp = "gongwen_mcp.server:main"
+gongwen-web = "gongwen_web.app:main"
+gongwen-demo = "gongwen_web.app:main"
+gongwen-admin = "gongwen_web.admin:main"
+
+[project.entry-points."yanzhang.llm_providers"]
+openai = "yanzhang.providers.llm.openai:OpenAIProvider"
+anthropic = "yanzhang.providers.llm.anthropic:AnthropicProvider"
+gemini = "yanzhang.providers.llm.gemini:GeminiProvider"
+
+[project.entry-points."yanzhang.article_discovery_providers"]
+official_search = "yanzhang.providers.content.official_search:OfficialSearchDiscoveryProvider"
+
+[project.entry-points."yanzhang.article_fetcher_providers"]
+official_http = "yanzhang.providers.content.article_http:HTTPArticleFetcher"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/gongwen_web",
+  "/gongwen_mcp",
+  "/yanzhang",
+  "/docs",
+  "/integrations",
+  "/deploy",
+  "/scripts",
+  "/tests",
+  "/.dockerignore",
+  "/.env.example",
+  "/.github",
+  "/.gitignore",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/PRIVACY.md",
+  "/README.md",
+  "/SECURITY.md",
+  "/pyproject.toml",
+  "/uv.lock",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gongwen_web", "gongwen_mcp", "yanzhang"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"docs" = "gongwen_mcp/docs"
+"integrations/workbuddy-gongwen" = "gongwen_mcp/integrations/workbuddy-gongwen"
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]

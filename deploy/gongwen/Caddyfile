@@ -1,0 +1,42 @@
+{
+	admin off
+}
+
+# Container-local readiness listener. The Docker health check calls this plain
+# HTTP endpoint so it verifies the complete Caddy -> application path without
+# depending on public DNS, certificate issuance, or HTTP-to-HTTPS redirects.
+http://127.0.0.1:2019 {
+	@ready path /api/ready
+	handle @ready {
+		reverse_proxy gongwen:8787 {
+			header_up Host 127.0.0.1
+		}
+	}
+
+	respond 404
+}
+
+{$GONGWEN_SITE_ADDRESS} {
+	encode zstd gzip
+
+	request_body {
+		max_size {$GONGWEN_PROXY_MAX_REQUEST_SIZE:2MB}
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
+
+	reverse_proxy gongwen:8787 {
+		health_uri /api/ready
+		health_headers {
+			Host 127.0.0.1
+		}
+		health_interval 30s
+		health_timeout 5s
+	}
+}

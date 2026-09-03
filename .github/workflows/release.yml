@@ -1,0 +1,63 @@
+name: Preview release
+
+on:
+  push:
+    tags:
+      - "v*-preview.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/yanzhang-venv
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.9"
+      - name: Install locked environment
+        run: uv sync --frozen --all-extras
+      - name: Verify tag and audit source
+        run: |
+          uv run python scripts/verify_release_tag.py "${GITHUB_REF_NAME}"
+          uv run python scripts/release_audit.py
+      - name: Run network-isolated release tests
+        env:
+          GONGWEN_DATA_DIR: ${{ runner.temp }}/gongwen-test-data
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: 127.0.0.1,localhost,testserver
+        run: uv run pytest -p no:cacheprovider
+      - name: Run static checks
+        run: |
+          uv run ruff check --no-cache .
+          uv run ruff format --check --no-cache .
+          uv run mypy --cache-dir="${RUNNER_TEMP}/mypy-cache" gongwen_web gongwen_mcp yanzhang
+      - name: Build, audit and checksum
+        run: |
+          uv build
+          uv run python scripts/package_connector.py dist
+          uv run python scripts/release_audit.py --artifacts dist
+          uv run python scripts/write_checksums.py dist
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          dist/*.whl dist/*.tar.gz dist/*.zip dist/SHA256SUMS
+          --verify-tag --prerelease --generate-notes
+          --title "Yanzhang Gongwen ${GITHUB_REF_NAME}"

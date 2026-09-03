@@ -1,0 +1,25 @@
+{
+  "name": "砚章公文写作",
+  "name_zh": "砚章公文写作",
+  "name_en": "Gongwen Writing",
+  "description": "Draft, revise, review, research, store, and export Chinese official documents.",
+  "description_zh": "完成公文拟题、成文、改写、审校、资料检索、版本管理与 Word 导出。",
+  "description_en": "Draft, revise, review, research, store, and export Chinese official documents.",
+  "source": "gongwen-writing",
+  "type": "mcp",
+  "version": "0.1.0-preview.1",
+  "minWorkbuddyVersion": "4.23.0",
+  "auth_mode": "token",
+  "examples_zh": [
+    "围绕政绩观生成十个排比式标题，并说明推荐理由",
+    "检索权威文章来源，按三段式方法起草一篇讲话稿",
+    "审校这篇材料中的事实、占位符和表达问题",
+    "保存当前文稿并导出带 Word 域的模板"
+  ],
+  "examples_en": [
+    "Generate ten parallel-style titles about performance evaluation and rank them",
+    "Research official articles and draft a three-part speech",
+    "Review this document for factual support, placeholders, and style issues",
+    "Save the current draft and export a Word field template"
+  ]
+}

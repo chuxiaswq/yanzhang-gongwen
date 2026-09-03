@@ -1,0 +1,7 @@
+# PEP 517 backend and its direct runtime dependencies. Keep overlapping
+# versions aligned with uv.lock / requirements.lock when refreshing this file.
+hatchling==1.31.0
+packaging==26.2
+pathspec==1.1.1
+pluggy==1.6.0
+trove-classifiers==2026.6.1.19
