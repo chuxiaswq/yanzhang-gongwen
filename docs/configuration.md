@@ -1,6 +1,6 @@
 # 砚章·AI文字工作台配置参考
 
-`v0.2.0-preview.1` 的首选环境变量前缀是 `YANZHANG_`。为便于原部署原地升级，每个运行时变量
+`v0.2.0-preview.2` 的首选环境变量前缀是 `YANZHANG_`。为便于原部署原地升级，每个运行时变量
 也接受同名后缀的 `GONGWEN_` 写法；例如 `YANZHANG_DATA_DIR` 对应
 `GONGWEN_DATA_DIR`。两者同时设置时，`YANZHANG_*` 优先。
 

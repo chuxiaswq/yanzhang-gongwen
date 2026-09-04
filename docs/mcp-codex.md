@@ -1,6 +1,6 @@
 # 在 Codex 与通用 MCP 客户端中使用砚章
 
-`v0.2.0-preview.1` 同时提供本机 stdio 和远程 Streamable HTTP。两种传输注册同一组工具并读取
+`v0.2.0-preview.2` 同时提供本机 stdio 和远程 Streamable HTTP。两种传输注册同一组工具并读取
 同一项目数据；首选命令是 `yanzhang-mcp`，首选工具命名空间是 `yanzhang_*`。
 
 ## 1. 安装与本机注册

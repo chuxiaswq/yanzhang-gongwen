@@ -1,6 +1,6 @@
 # 砚章·AI文字工作台
 
-**当前预览：`v0.2.0-preview.1`（Python 包版本 `0.2.0b1`）**
+**当前预览：`v0.2.0-preview.2`（Python 包版本 `0.2.0b2`）**
 
 砚章是一套本地优先、证据可追溯、可通过 Web 与 MCP 使用的中文文字工作台。它把任务简报、
 项目资料、标题与开头、块编辑母稿、渠道变体、证据链、六维审校和 Word 交付串成一条工作流；
@@ -167,6 +167,10 @@ uv run ruff check --no-cache .
 uv run ruff format --check --no-cache .
 uv run mypy --cache-dir="${TMPDIR:-/tmp}/yanzhang-mypy-cache" \
   gongwen_web gongwen_mcp yanzhang yanzhang_core yanzhang_academic
+uv export --frozen --all-extras --no-emit-project --format requirements-txt \
+  --output-file "${TMPDIR:-/tmp}/yanzhang-all-requirements.txt"
+uv run pip-audit --requirement "${TMPDIR:-/tmp}/yanzhang-all-requirements.txt" \
+  --progress-spinner off
 python scripts/release_audit.py
 ```
 

@@ -7,7 +7,7 @@
   "description_en": "A project-based AI writing workbench for official, workplace, media, and academic writing with sources, headlines, master drafts, channel variants, evidence, review, revisions, and export.",
   "source": "yanzhang-writing",
   "type": "mcp",
-  "version": "0.2.0-preview.1",
+  "version": "0.2.0-preview.2",
   "minWorkbuddyVersion": "4.23.0",
   "auth_mode": "token",
   "examples_zh": [

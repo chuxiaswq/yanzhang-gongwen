@@ -1,6 +1,6 @@
 # 砚章·AI文字工作台 MCP 契约
 
-本文是 `v0.2.0-preview.1` 的 MCP 服务契约。服务同时注册：
+本文是 `v0.2.0-preview.2` 的 MCP 服务契约。服务同时注册：
 
 - 45 个项目化、多场景 `yanzhang_*` 工具；
 - 既有 26 个 `gongwen_*` 公文工具；
@@ -351,7 +351,7 @@ integrations/workbuddy-gongwen/
 └── skills/gongwen/SKILL.md
 ```
 
-连接器版本为 `0.2.0-preview.1`，默认服务器名 `yanzhang-writing`，凭据字段
+连接器版本为 `0.2.0-preview.2`，默认服务器名 `yanzhang-writing`，凭据字段
 `YANZHANG_MCP_ACCESS_TOKEN`。把 `DOMAIN` 换成部署域名后导入客户端，先调用
 `yanzhang_get_status`，再验证项目、资料、标题、母稿、变体、审校、学术与导出。
 
@@ -361,7 +361,7 @@ integrations/workbuddy-gongwen/
 python scripts/package_connector.py dist
 ```
 
-产物为 `dist/yanzhang-workbuddy-connector-0.2.0-preview.1.zip`。在 WorkBuddy 的 Connector
+产物为 `dist/yanzhang-workbuddy-connector-0.2.0-preview.2.zip`。在 WorkBuddy 的 Connector
 管理界面导入后，填写部署端生成的 MCP Token；Token Schema 会将它映射到
 `${YANZHANG_MCP_ACCESS_TOKEN}`，真实值不会写入 ZIP。更新域名或 Skill 后重新打包并导入同版本
 测试实例，确认 71 个工具的目录与实际服务一致，再发布给正式工作区。

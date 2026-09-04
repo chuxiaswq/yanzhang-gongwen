@@ -1,14 +1,14 @@
 # 砚章预览版发布流程
 
-本清单适用于“砚章·AI文字工作台”`v0.2.0-preview.1`。Python 包遵循 PEP 440，发布标签和
+本清单适用于“砚章·AI文字工作台”`v0.2.0-preview.2`。Python 包遵循 PEP 440，发布标签和
 WorkBuddy Connector 使用面向用户的 preview 版本。
 
 ## 1. 版本映射
 
 ```text
-Python package: 0.2.0b1
-Git tag:        v0.2.0-preview.1
-Connector:      0.2.0-preview.1
+Python package: 0.2.0b2
+Git tag:        v0.2.0-preview.2
+Connector:      0.2.0-preview.2
 ```
 
 同一发布中的 `pyproject.toml`、`CHANGELOG.md`、Connector 元数据与 Skill frontmatter 必须一致。
@@ -33,6 +33,10 @@ uv run ruff format --check --no-cache .
 uv run mypy --cache-dir="${TMPDIR:-/tmp}/yanzhang-mypy-cache" \
   gongwen_web gongwen_mcp yanzhang yanzhang_core yanzhang_academic
 uv lock --check
+uv export --frozen --all-extras --no-emit-project --format requirements-txt \
+  --output-file "${TMPDIR:-/tmp}/yanzhang-all-requirements.txt"
+uv run pip-audit --requirement "${TMPDIR:-/tmp}/yanzhang-all-requirements.txt" \
+  --progress-spinner off
 python scripts/release_audit.py
 ```
 
@@ -61,9 +65,9 @@ python scripts/write_checksums.py dist
 
 macOS 可使用 `shasum -a 256` 手动复核。预期产物包括：
 
-- `yanzhang_gongwen-0.2.0b1-py3-none-any.whl`
-- `yanzhang_gongwen-0.2.0b1.tar.gz`
-- `yanzhang-workbuddy-connector-0.2.0-preview.1.zip`
+- `yanzhang_gongwen-0.2.0b2-py3-none-any.whl`
+- `yanzhang_gongwen-0.2.0b2.tar.gz`
+- `yanzhang-workbuddy-connector-0.2.0-preview.2.zip`
 - `SHA256SUMS`
 
 发布审计会检查每个归档成员、文件类型、路径、大小、凭据特征和本机绝对路径。发行内容不含
@@ -95,7 +99,7 @@ macOS 可使用 `shasum -a 256` 手动复核。预期产物包括：
 - 发布工作流只申请创建 GitHub 预发布和上传产物所需的 `contents: write`；
 - CI 与本地命令均使用失效代理或模拟传输验证离线测试边界。
 
-推送 `v0.2.0-preview.1` 后，确认 GitHub 条目标记为预发布，说明中列出四场景、兼容面、迁移和
+推送 `v0.2.0-preview.2` 后，确认 GitHub 条目标记为预发布，说明中列出四场景、兼容面、迁移和
 已知预览边界。
 
 ## 6. 发布后复核

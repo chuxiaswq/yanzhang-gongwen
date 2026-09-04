@@ -1,6 +1,6 @@
 # 砚章·AI文字工作台隐私说明
 
-本说明适用于 `v0.2.0-preview.1` 的 Web、HTTP API、stdio MCP、Streamable HTTP MCP、
+本说明适用于 `v0.2.0-preview.2` 的 Web、HTTP API、stdio MCP、Streamable HTTP MCP、
 文章来源和学术资料处理功能。砚章以本地优先为默认原则；外部传输只发生在用户主动调用已配置
 的模型或来源连接器时。
 

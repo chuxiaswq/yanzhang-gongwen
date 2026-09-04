@@ -32,7 +32,7 @@ FROM python:3.12-slim-bookworm AS runtime
 
 LABEL org.opencontainers.image.title="Yanzhang AI Writing Workspace" \
       org.opencontainers.image.description="Local-first general writing, research and MCP service" \
-      org.opencontainers.image.version="0.2.0b1"
+      org.opencontainers.image.version="0.2.0b2"
 
 ENV PATH="/opt/gongwen-venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
