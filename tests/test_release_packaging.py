@@ -119,6 +119,7 @@ def test_github_workflows_pin_actions_and_audit_every_archive() -> None:
         assert "UV_PROJECT_ENVIRONMENT=%s/yanzhang-venv" in workflow
         assert '"$RUNNER_TEMP" >> "$GITHUB_ENV"' in workflow
         assert "pytest -p no:cacheprovider" in workflow
+        assert "-type d -name __pycache__ -prune -exec rm -rf {} +" in workflow
         assert "ruff check --no-cache" in workflow
         assert "ruff format --check --no-cache" in workflow
         assert 'mypy --cache-dir="${RUNNER_TEMP}/mypy-cache"' in workflow

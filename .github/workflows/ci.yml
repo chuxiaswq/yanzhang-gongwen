@@ -47,6 +47,10 @@ jobs:
           uv run ruff check --no-cache .
           uv run ruff format --check --no-cache .
           uv run mypy --cache-dir="${RUNNER_TEMP}/mypy-cache" gongwen_web gongwen_mcp yanzhang
+      - name: Remove generated test bytecode
+        run: >-
+          find gongwen_mcp gongwen_web yanzhang tests scripts
+          -type d -name __pycache__ -prune -exec rm -rf {} +
       - name: Build and audit release archives
         run: |
           uv build
