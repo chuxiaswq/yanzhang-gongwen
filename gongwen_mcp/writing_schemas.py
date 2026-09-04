@@ -13,7 +13,12 @@ from yanzhang_academic.models import (
     ResearchClaim,
     ReviewComment,
 )
-from yanzhang_core.models import AssetStatus, Channel, KnowledgeKind
+from yanzhang_core.models import (
+    AssetStatus,
+    Channel,
+    KnowledgeKind,
+    WritingStructureSection,
+)
 from yanzhang_core.packs import HeadlineKind, ScenarioPackId
 
 type SearchScope = Literal["all", "materials", "assets", "literature"]
@@ -125,6 +130,7 @@ class DeleteProjectTermRequest(WritingRequest):
 
 class AddMaterialRequest(WritingRequest):
     project_id: str = Field(min_length=1, max_length=128)
+    material_id: str | None = Field(default=None, min_length=1, max_length=128)
     title: str = Field(min_length=1, max_length=500)
     content: str = Field(min_length=1, max_length=500_000)
     kind: KnowledgeKind = "source"
@@ -174,7 +180,7 @@ class UnifiedSearchRequest(WritingRequest):
 
 class _BriefRequest(WritingRequest):
     project_id: str = Field(min_length=1, max_length=128)
-    topic: str = Field(min_length=1, max_length=500)
+    topic: str = Field(min_length=1, max_length=300)
     goal: str = Field(min_length=1, max_length=2_000)
     audience: str = Field(min_length=1, max_length=500)
     channel: Channel = "document"
@@ -188,6 +194,11 @@ class _BriefRequest(WritingRequest):
     keywords: list[str] = Field(default_factory=list, max_length=32)
     material_ids: list[str] = Field(default_factory=list, max_length=128)
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    selected_title: str | None = Field(default=None, min_length=1, max_length=300)
+    structure_override: list[WritingStructureSection] = Field(
+        default_factory=list,
+        max_length=24,
+    )
 
     @field_validator("constraints", "keywords")
     @classmethod
@@ -198,6 +209,19 @@ class _BriefRequest(WritingRequest):
     @classmethod
     def validate_material_ids(cls, values: list[str]) -> list[str]:
         return _unique_text(values, "material_ids", max_item_length=128)
+
+    @field_validator("structure_override")
+    @classmethod
+    def validate_structure_override(
+        cls, values: list[WritingStructureSection]
+    ) -> list[WritingStructureSection]:
+        ids = [value.id for value in values]
+        titles = [value.title for value in values]
+        if len(ids) != len(set(ids)):
+            raise ValueError("structure_override 的章节标识不得重复")
+        if len(titles) != len(set(titles)):
+            raise ValueError("structure_override 的章节标题不得重复")
+        return values
 
 
 class GenerateTitlesRequest(_BriefRequest):
@@ -212,6 +236,7 @@ class GenerateTitlesRequest(_BriefRequest):
 
 
 class CreateWorkflowRequest(_BriefRequest):
+    brief_id: str | None = Field(default=None, min_length=1, max_length=128)
     auto_review: bool = True
     requested_exports: list[AssetExportFormat] = Field(default_factory=list, max_length=7)
 

@@ -91,7 +91,7 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 | 工具 | 核心输入 | 作用 |
 | --- | --- | --- |
 | `yanzhang_get_status` | 无 | 查看项目、工作流、模型、学术和导出能力 |
-| `yanzhang_list_scene_packs` | 可选 `channel`、`content_type` | 列出四个场景包与配方 |
+| `yanzhang_list_scene_packs` | 可选 `channel`、`content_type` | 列出四个场景包与 19 个配方 |
 | `yanzhang_get_scene_pack` | `pack_id` | 读取配方结构、渠道与事实策略 |
 
 ### 项目与资料
@@ -104,7 +104,7 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 | `yanzhang_upsert_project_term` | 项目、术语、首选表达；可选术语 ID、说明与不建议变体 | 新增或更新项目术语规则 |
 | `yanzhang_list_project_terms` | `project_id`、分页 | 列出术语、首选表达和不建议变体 |
 | `yanzhang_delete_project_term` | `project_id`、`term_id` | 删除一条项目术语规则 |
-| `yanzhang_add_material` | `project_id`、`title`、`content` | 添加来源、风格参考、历史稿、术语或笔记 |
+| `yanzhang_add_material` | `project_id`、`title`、`content`；可选 `material_id` | 添加来源、风格参考、历史稿、术语或笔记；稳定 ID 用于幂等更新 |
 | `yanzhang_list_materials` | `project_id`；可选类型、标签、分页 | 列出项目资料 |
 | `yanzhang_get_material` | `project_id`、`material_id`；可选分块参数 | 分块读取资料 |
 | `yanzhang_search` | `project_id`、`query`；可选范围、标签、分页 | 在资料、资产和文献中统一检索 |
@@ -114,7 +114,7 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 | 工具 | 核心输入 | 作用 |
 | --- | --- | --- |
 | `yanzhang_generate_titles` | 项目、主题、目标、受众、场景包、配方、文种 | 生成标题、开头、小标题或段首观点句候选 |
-| `yanzhang_create_workflow` | 完整任务简报；可选自动审校和导出格式 | 创建可恢复工作流 |
+| `yanzhang_create_workflow` | 完整任务简报；可选 `brief_id`、自动审校和导出格式 | 创建可恢复工作流并返回绑定的 `brief_id` |
 | `yanzhang_run_workflow` | `project_id`、`workflow_id`；可选同步/后台和恢复步骤 | 在项目作用域内运行或恢复工作流 |
 | `yanzhang_get_workflow` | `project_id`、`workflow_id` | 查询项目内步骤、脱敏错误摘要与输出资产 |
 | `yanzhang_cancel_workflow` | `project_id`、`workflow_id` | 请求取消项目内尚未完成的工作流 |
@@ -150,6 +150,11 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 字段枚举、默认值和数量边界见 [完整 MCP 契约](gongwen-mcp.md)。工具 schema 设置
 `additionalProperties: false`，未定义字段会作为参数错误返回。
 
+四个场景包现共提供 19 个配方。`gongwen` 除工作总结、汇报材料、实施方案和会议纪要外，
+新增 `leadership-speech`（领导讲话）与 `research-report`（调研报告）。`yanzhang_create_workflow` 还可传入
+`selected_title`（1–300 字符）和最多 24 个 `structure_override` 章节；每节包含唯一
+`id`、唯一 `title`、`purpose` 和 `required`，工作流将把这组有序章节用于提纲与母稿。
+
 ## 4. 推荐调用顺序
 
 ### 通用写作
@@ -157,9 +162,14 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 1. `yanzhang_get_status` 检查能力；
 2. `yanzhang_list_scene_packs` / `yanzhang_get_scene_pack` 选择配方；
 3. `yanzhang_create_project` 建项目；
-4. `yanzhang_add_material` 添加事实和风格资料，用 `yanzhang_upsert_project_term` 维护首选术语；
-5. `yanzhang_generate_titles` 先比较标题、开头、小标题或观点句；
-6. `yanzhang_create_workflow` 后调用 `yanzhang_run_workflow`；后台模式用
+4. `yanzhang_add_material` 添加事实和风格资料；需要重试或同步时传稳定 `material_id` 做幂等写入，
+   并用 `yanzhang_upsert_project_term` 维护首选术语；
+5. `yanzhang_generate_titles` 先比较标题、开头、小标题或观点句；采用候选后将其写入 `selected_title`，
+   有自定义结构时同时写入 `structure_override`；
+6. 简报已由 Web/HTTP 保存时，把返回的 `brief_id` 传给 `yanzhang_create_workflow`；否则省略
+   `brief_id` 由工作流创建并保存简报。即使传入 `brief_id`，仍须提交完整必填简报字段，
+   且规范化后的内容必须与已存简报一致。再调用 `yanzhang_run_workflow`，并校验创建响应中的
+   `brief_id` 以绑定项目母稿；后台模式用
    `yanzhang_get_workflow` 查询，必要时从明确步骤恢复；
 7. `yanzhang_get_asset` 分块读取母稿，`yanzhang_create_variant` 派生邮件、演示、网页或社交版本；
 8. `yanzhang_review_asset` 查看六维问题，修订后用 `yanzhang_list_revisions` 复核版本；
@@ -168,6 +178,10 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 工作流的运行、查询、取消和恢复始终同时传入创建时的 `project_id`。审校只希望本地规则时保持
 `live=false`；显式使用服务端模型时传 `live=true`，并检查响应的 `effective_mode` 与
 `resolved_route`。导出后优先按返回的项目作用域 Resource URI 读取文件。
+运行、查询、取消或恢复响应的 `workflow.brief_id` 与创建时一致；只有创建响应另外提供顶层
+`brief_id`。
+`kind=style_reference` 的项目资料（包括选中的文章）只供结构、标题节奏、语气和句式参考，
+不进入正文事实或证据链。
 
 ### 学术写作
 
@@ -215,8 +229,9 @@ v0.2 导出 URI 为 `yanzhang://projects/{project_id}/exports/{artifact_id}`，�
 
 - stdio 参数在本机进程间传递；远程模式的工具参数通过部署域名发送，公网入口使用 HTTPS。
 - 公开来源或真实模型工具具有网络副作用；先缩小资料和查询范围，再调用相应步骤。
-- MCP 返回稳定错误类别，如 `invalid_request`、`not_found`、`operation_timeout` 和
-  `internal_error`；修正字段或状态后重试，不把完整请求正文复制到日志。
+- 已保存的 `brief_id` 同时绑定项目与规范化内容；相同输入可安全重放，内容变化时使用新 ID。
+- MCP 返回稳定错误类别，如 `invalid_request`、`brief_conflict`、`project_scope_error`、`not_found`、
+  `operation_timeout` 和 `internal_error`；修正字段或状态后重试，不把完整请求正文复制到日志。
 - 后台工作流超时后先查询状态；导出与发布前核对目标资产 ID 和版本，避免重复动作。
 - `metadata_verified`、DOI 规范化、引用评分和参考文献排版的边界见
   [academic-writing.md](academic-writing.md)。

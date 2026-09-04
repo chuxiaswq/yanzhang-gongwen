@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from yanzhang_core import (
+    CandidateFactContext,
     CandidateRequest,
     Citation,
     Claim,
@@ -25,6 +26,8 @@ from yanzhang_core import (
     TextAsset,
     WritingBrief,
     WritingProject,
+    WritingStructureSection,
+    YanzhangComposer,
     attach_material_evidence,
     build_provenance_graph,
     evidence_from_material,
@@ -165,7 +168,9 @@ def test_four_scenario_packs_expose_planned_high_frequency_recipes() -> None:
     packs = list_scenario_packs()
 
     assert tuple(pack.id for pack in packs) == ("gongwen", "workplace", "media", "academic")
-    assert len(list_recipes()) == 17
+    assert len(list_recipes()) == 19
+    gongwen_recipe_ids = {recipe.id for recipe in get_scenario_pack("gongwen").recipes}
+    assert {"leadership-speech", "research-report"}.issubset(gongwen_recipe_ids)
     assert get_scenario_pack("academic").name == "学术与研究写作"
     assert get_recipe("work-summary", pack_id="gongwen").content_type == "工作总结"
     assert get_recipe("work-email").channels == ("email",)
@@ -219,6 +224,77 @@ def test_candidate_scoring_penalizes_unsupported_numbers() -> None:
     assert invented.factual_restraint < grounded.factual_restraint
 
 
+def test_non_title_candidates_use_saved_title_structure_and_explicit_focus() -> None:
+    brief = _brief().model_copy(
+        update={
+            "selected_title": "以实干实绩答好项目复盘之问",
+            "keywords": (),
+            "structure_override": (
+                WritingStructureSection(
+                    id="progress",
+                    title="一、主要进展",
+                    purpose="概括已经核定的阶段进展。",
+                ),
+            ),
+        }
+    )
+
+    opening = generate_candidates(
+        CandidateRequest(brief=brief, kind="opening", count=1, formula_ids=("direct",))
+    )
+    heading = generate_candidates(
+        CandidateRequest(
+            brief=brief,
+            kind="section_heading",
+            count=1,
+            formula_ids=("direct",),
+        )
+    )
+    explicit = generate_candidates(
+        CandidateRequest(
+            brief=brief.model_copy(update={"keywords": ("用户明确焦点",)}),
+            kind="topic_sentence",
+            count=1,
+            formula_ids=("direct",),
+        )
+    )
+    title = generate_candidates(
+        CandidateRequest(brief=brief, kind="title", count=1, formula_ids=("direct",))
+    )
+
+    assert opening.recommended.startswith("围绕以实干实绩答好项目复盘之问")
+    assert heading.recommended == "一、主要进展"
+    assert explicit.recommended.startswith("本段围绕用户明确焦点展开")
+    assert title.recommended == brief.title
+
+
+def test_fact_material_context_is_a_bounded_focus_and_scoring_source() -> None:
+    context = CandidateFactContext(
+        material_id="source-grounded",
+        title="核定调研台账",
+        excerpt="经核对，已完成12项任务。",
+    )
+    brief = _brief().model_copy(update={"keywords": (), "knowledge_item_ids": ()})
+    request = CandidateRequest(
+        brief=brief,
+        kind="section_heading",
+        count=1,
+        formula_ids=("direct",),
+        fact_contexts=(context,),
+    )
+
+    batch = generate_candidates(request)
+    grounded = score_candidate("项目复盘已完成12项任务", request)
+    unsupported = score_candidate(
+        "项目复盘已完成12项任务",
+        request.model_copy(update={"fact_contexts": ()}),
+    )
+
+    assert batch.recommended == context.title
+    assert grounded.factual_restraint == 100
+    assert unsupported.factual_restraint < grounded.factual_restraint
+
+
 def test_candidate_engine_scores_the_full_catalog_before_truncation() -> None:
     batch = generate_candidates(CandidateRequest(brief=_brief(), kind="title", count=5))
     formula_ids = [candidate.formula_id for candidate in batch.candidates]
@@ -264,6 +340,34 @@ def test_each_expression_kind_exposes_rhetorical_formula_families(kind: str) -> 
     assert {"parallel", "antithesis", "progression", "triad", "quartet"} <= techniques
     assert len({formula.id for formula in formulas}) == len(formulas)
     assert all(formula.kind == kind for formula in formulas)
+
+
+@pytest.mark.asyncio
+async def test_local_composer_normalizes_constraint_terminal_punctuation() -> None:
+    brief = _brief().model_copy(
+        update={
+            "constraints": (
+                "所有数字须有来源。",
+                "标题结构保持平行；",
+                "按期交付！",
+            ),
+        }
+    )
+
+    draft = await YanzhangComposer().compose(
+        brief,
+        get_recipe(brief.recipe_id, pack_id=brief.scenario_pack_id),
+    )
+    paragraphs = tuple(block.text for block in draft.blocks if block.kind == "paragraph")
+
+    assert paragraphs
+    assert all("。；" not in paragraph for paragraph in paragraphs)
+    assert all("；；" not in paragraph for paragraph in paragraphs)
+    assert all("！！" not in paragraph for paragraph in paragraphs)
+    assert all(
+        paragraph.endswith("写作时同时遵循：所有数字须有来源；标题结构保持平行；按期交付。")
+        for paragraph in paragraphs
+    )
 
 
 def test_formula_catalog_includes_explainable_main_subtitle_and_segment_patterns() -> None:

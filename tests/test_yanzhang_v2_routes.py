@@ -194,6 +194,37 @@ def test_materials_search_and_headlines_preserve_project_identity(client: TestCl
     assert cases[-1][0].json()["request"]["formula_ids"] == ["parallel-triad"]
 
 
+def test_topic_and_persisted_title_share_the_300_character_boundary(
+    client: TestClient,
+    platform: _FakePlatform,
+) -> None:
+    too_long = "题" * 301
+
+    headlines = client.post(
+        "/api/v2/projects/proj-1/headlines",
+        json={**_brief(), "topic": too_long},
+    )
+    workflow = client.post(
+        "/api/v2/projects/proj-1/workflows",
+        json={**_brief(), "topic": too_long},
+    )
+    brief = client.post(
+        "/api/v2/projects/proj-1/briefs",
+        json={**_saved_brief(), "title": too_long},
+    )
+
+    assert [response.status_code for response in (headlines, workflow, brief)] == [422, 422, 422]
+    assert all(
+        response.json()["error"]["code"] == "validation_error"
+        for response in (
+            headlines,
+            workflow,
+            brief,
+        )
+    )
+    assert platform.calls == []
+
+
 def test_workflow_lifecycle_routes_forward_without_fabricated_state(client: TestClient) -> None:
     created = client.post(
         "/api/v2/projects/proj-1/workflows",
@@ -241,6 +272,73 @@ def test_workflow_lifecycle_routes_forward_without_fabricated_state(client: Test
         _assert_forwarded(response, operation=operation, request_type=request_type)
         assert response.json()["request"]["workflow_id"] == "flow-1"
         assert response.json()["request"]["project_id"] == "proj-1"
+
+
+def test_workbench_context_fields_cross_http_boundaries_unchanged(client: TestClient) -> None:
+    structure = [
+        {
+            "id": "review",
+            "title": "一、在回望中看清来路",
+            "purpose": "回顾总体进展。",
+        },
+        {
+            "id": "action",
+            "title": "二、在攻坚中打开新局",
+            "purpose": "部署下一步行动。",
+        },
+    ]
+    material = client.post(
+        "/api/v2/projects/proj-1/materials",
+        json={
+            "material_id": "workspace-source-stable",
+            "title": "主参考材料",
+            "content": "已完成12项任务。",
+            "kind": "source",
+        },
+    )
+    _assert_forwarded(
+        material,
+        operation="yanzhang_add_material",
+        request_type="AddMaterialRequest",
+    )
+    assert material.json()["request"]["material_id"] == "workspace-source-stable"
+
+    brief_payload = {
+        **_saved_brief(),
+        "brief_id": "brief-workbench",
+        "material_ids": ["workspace-source-stable"],
+        "selected_title": "以实干破难题 以实绩开新局",
+        "structure_override": structure,
+    }
+    saved = client.post("/api/v2/projects/proj-1/briefs", json=brief_payload)
+    _assert_forwarded(saved, operation="create_brief", request_type="CreateBriefRequest")
+    assert saved.json()["request"]["brief_id"] == "brief-workbench"
+    assert saved.json()["request"]["selected_title"] == "以实干破难题 以实绩开新局"
+    assert saved.json()["request"]["structure_override"] == [
+        {**section, "required": True} for section in structure
+    ]
+
+    workflow_payload = {
+        **_brief(),
+        "brief_id": "brief-workbench",
+        "material_ids": ["workspace-source-stable"],
+        "selected_title": "以实干破难题 以实绩开新局",
+        "structure_override": structure,
+    }
+    created = client.post(
+        "/api/v2/projects/proj-1/workflows",
+        json=workflow_payload,
+    )
+    _assert_forwarded(
+        created,
+        operation="yanzhang_create_workflow",
+        request_type="CreateWorkflowRequest",
+    )
+    assert created.json()["request"]["brief_id"] == "brief-workbench"
+    assert created.json()["request"]["selected_title"] == "以实干破难题 以实绩开新局"
+    assert created.json()["request"]["structure_override"] == [
+        {**section, "required": True} for section in structure
+    ]
 
 
 def test_asset_read_variant_revision_review_and_export_routes(client: TestClient) -> None:
@@ -404,6 +502,153 @@ def test_canonical_writes_persist_with_the_concrete_platform(tmp_path: Path) -> 
             )
             assert persisted.status_code == 200
             assert persisted.json()["asset"]["current_revision"] == 2
+    finally:
+        platform.close()
+
+
+def test_cross_project_material_id_returns_stable_scope_error(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path / "data")
+    platform = YanzhangPlatformService(
+        WritingStorage(tmp_path / "data" / "writing.sqlite3"),
+        artifact_store=store,
+    )
+    app = Starlette(routes=v2_routes())
+    app.state.yanzhang_platform = platform
+    app.state.gongwen_artifact_store = store
+    try:
+        with TestClient(app) as real_client:
+            first = real_client.post(
+                "/api/v2/projects",
+                json={"name": "材料项目一", "scenario_pack_id": "gongwen"},
+            ).json()["project"]["id"]
+            second = real_client.post(
+                "/api/v2/projects",
+                json={"name": "材料项目二", "scenario_pack_id": "gongwen"},
+            ).json()["project"]["id"]
+            material_id = "stable-project-scoped-material"
+            created = real_client.post(
+                f"/api/v2/projects/{first}/materials",
+                json={
+                    "material_id": material_id,
+                    "title": "项目一材料",
+                    "content": "仅属于项目一。",
+                },
+            )
+            assert created.status_code == 201
+
+            crossed = real_client.post(
+                f"/api/v2/projects/{second}/materials",
+                json={
+                    "material_id": material_id,
+                    "title": "项目二材料",
+                    "content": "跨项目复用 ID。",
+                },
+            )
+
+            assert crossed.status_code == 409
+            assert crossed.json() == {
+                "error": {
+                    "code": "project_scope_error",
+                    "message": "资源不属于当前项目",
+                }
+            }
+            assert material_id not in crossed.text
+    finally:
+        platform.close()
+
+
+def test_stable_brief_id_is_idempotent_and_conflicts_without_reflection(
+    tmp_path: Path,
+) -> None:
+    store = ArtifactStore(tmp_path / "data")
+    platform = YanzhangPlatformService(
+        WritingStorage(tmp_path / "data" / "writing.sqlite3"),
+        artifact_store=store,
+    )
+    app = Starlette(routes=v2_routes())
+    app.state.yanzhang_platform = platform
+    app.state.gongwen_artifact_store = store
+    try:
+        with TestClient(app) as real_client:
+            project_id = real_client.post(
+                "/api/v2/projects",
+                json={"name": "简报幂等项目", "scenario_pack_id": "gongwen"},
+            ).json()["project"]["id"]
+            brief_id = "stable-private-brief-id"
+            payload = {**_saved_brief(), "brief_id": brief_id}
+
+            created = real_client.post(
+                f"/api/v2/projects/{project_id}/briefs",
+                json=payload,
+            )
+            replayed = real_client.post(
+                f"/api/v2/projects/{project_id}/briefs",
+                json=payload,
+            )
+            conflicted = real_client.post(
+                f"/api/v2/projects/{project_id}/briefs",
+                json={**payload, "goal": "敏感冲突正文 FIXTURE_PRIVATE_GOAL"},
+            )
+
+            assert created.status_code == replayed.status_code == 201
+            assert created.json() == replayed.json()
+            assert created.json()["brief_id"] == brief_id
+            assert conflicted.status_code == 409
+            assert conflicted.json() == {
+                "error": {
+                    "code": "brief_conflict",
+                    "message": "任务简报标识已绑定其他内容",
+                }
+            }
+            assert brief_id not in conflicted.text
+            assert "FIXTURE_PRIVATE_GOAL" not in conflicted.text
+            persisted = platform.storage.get_brief(brief_id, project_id=project_id)
+            assert persisted.goal == payload["goal"]
+    finally:
+        platform.close()
+
+
+def test_cross_project_brief_id_returns_stable_scope_error(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path / "data")
+    platform = YanzhangPlatformService(
+        WritingStorage(tmp_path / "data" / "writing.sqlite3"),
+        artifact_store=store,
+    )
+    app = Starlette(routes=v2_routes())
+    app.state.yanzhang_platform = platform
+    app.state.gongwen_artifact_store = store
+    try:
+        with TestClient(app) as real_client:
+            first = real_client.post(
+                "/api/v2/projects",
+                json={"name": "简报项目一", "scenario_pack_id": "gongwen"},
+            ).json()["project"]["id"]
+            second = real_client.post(
+                "/api/v2/projects",
+                json={"name": "简报项目二", "scenario_pack_id": "gongwen"},
+            ).json()["project"]["id"]
+            brief_id = "stable-project-scoped-brief"
+            payload = {**_saved_brief(), "brief_id": brief_id}
+            created = real_client.post(
+                f"/api/v2/projects/{first}/briefs",
+                json=payload,
+            )
+            assert created.status_code == 201
+
+            crossed = real_client.post(
+                f"/api/v2/projects/{second}/briefs",
+                json=payload,
+            )
+
+            assert crossed.status_code == 409
+            assert crossed.json() == {
+                "error": {
+                    "code": "project_scope_error",
+                    "message": "资源不属于当前项目",
+                }
+            }
+            assert brief_id not in crossed.text
+            assert platform.storage.list_briefs(project_id=second) == []
     finally:
         platform.close()
 

@@ -59,6 +59,7 @@ from gongwen_mcp.writing_schemas import (
     UpsertProjectTermRequest,
     VerifyCitationsRequest,
 )
+from yanzhang_core.storage import BriefConflictError, ProjectScopeError
 
 type PlatformResult = Mapping[str, object]
 
@@ -404,6 +405,10 @@ class YanzhangWritingTools:
             raise YanzhangToolError("invalid_request", _validation_details(exc)) from None
         except TimeoutError:
             raise YanzhangToolError("operation_timeout", "操作超时，请稍后重试") from None
+        except BriefConflictError:
+            raise YanzhangToolError("brief_conflict", "任务简报标识已绑定其他内容") from None
+        except ProjectScopeError:
+            raise YanzhangToolError("project_scope_error", "资源不属于当前项目") from None
         except (KeyError, LookupError):
             raise YanzhangToolError("not_found", "未找到指定资源") from None
         except ValueError:

@@ -84,7 +84,7 @@ Provider API Key、模型 URL 或访问令牌。
 | 字段 | 必填/默认 | 限制 |
 | --- | --- | --- |
 | `project_id` | 必填 | 1–128 字符 |
-| `topic` | 必填 | 1–500 字符 |
+| `topic` | 必填 | 1–300 字符，与保存后的简报/资产标题上限一致 |
 | `goal` | 必填 | 1–2000 字符 |
 | `audience` | 必填 | 1–500 字符 |
 | `content_type` | 必填 | 1–100 字符 |
@@ -98,6 +98,12 @@ Provider API Key、模型 URL 或访问令牌。
 | `keywords` | `[]` | 最多 32 项，每项最多 500 字符 |
 | `material_ids` | `[]` | 最多 128 个项目内资料 ID |
 | `model_profile_id` | 空 | 填写时 1–100 字符 |
+| `selected_title` | 空 | 已采用标题，填写时 1–300 字符 |
+| `structure_override` | `[]` | 最多 24 个有序章节；非空时整体替代配方默认结构 |
+
+`structure_override` 每节为 `{id, title, purpose, required}`：`id` 1–80 字符、`title`
+1–100 字符、`purpose` 1–500 字符，`required` 默认 `true`。同一列表内的章节 ID 与标题
+必须各自唯一，输入顺序即提纲与母稿顺序。
 
 ## 3. 状态与场景包工具
 
@@ -107,9 +113,10 @@ Provider API Key、模型 URL 或访问令牌。
 | `yanzhang_list_scene_packs` | 可选 `channel`、`content_type` 1–100 | 列出匹配的场景包和配方 |
 | `yanzhang_get_scene_pack` | `pack_id` | 返回受众、配方、章节、渠道、输出格式与事实策略 |
 
-四个场景包共 17 个配方：
+四个场景包共 19 个配方：
 
-- `gongwen`：`work-summary`、`briefing-material`、`implementation-plan`、`meeting-minutes`；
+- `gongwen`：`work-summary`、`briefing-material`、`leadership-speech`（领导讲话）、
+  `research-report`（调研报告）、`implementation-plan`、`meeting-minutes`；
 - `workplace`：`work-email`、`weekly-report`、`business-proposal`、`meeting-followup`、
   `presentation-outline`；
 - `media`：`press-release`、`wechat-article`、`social-post`、`short-video-script`；
@@ -125,10 +132,13 @@ Provider API Key、模型 URL 或访问令牌。
 | `yanzhang_upsert_project_term` | `project_id`；`term` / `preferred_form` 1–200；可选 `term_id`、说明和最多 32 个不建议变体 | 新增或更新项目术语规则 |
 | `yanzhang_list_project_terms` | `project_id`；标准分页 | 列出项目术语与首选表达 |
 | `yanzhang_delete_project_term` | `project_id`、`term_id` 1–128 | 删除一条项目术语规则 |
-| `yanzhang_add_material` | `project_id`；`title` 1–500；`content` 1–500000；`kind=source`；`source_url` 最多 2000；`tags` 最多 64 项、单项 100 | 创建知识资料 |
+| `yanzhang_add_material` | `project_id`；可选 `material_id` 1–128；`title` 1–500；`content` 1–500000；`kind=source`；`source_url` 最多 2000；`tags` 最多 64 项、单项 100 | 创建知识资料；在同一项目内传稳定 ID 时幂等更新 |
 | `yanzhang_list_materials` | `project_id`；可选 `kind`、最多 32 个标签；标准分页 | 无 |
 | `yanzhang_get_material` | `project_id`、`material_id`；标准分块字段 | 无 |
 | `yanzhang_search` | `project_id`；`query` 1–2000；`scope=all`；最多 32 个标签；标准分页 | 无 |
+
+省略 `material_id` 时每次生成新资料 ID；指定稳定 ID 时，同项目首次调用创建资料，后续调用更新
+同一项资料。已属于其他项目的 ID 不会被改挂到当前项目。
 
 项目术语会参与 `terminology` 审校：发现不建议变体时指向首选表达。所有术语、资料、搜索范围与
 返回 ID 都受 `project_id` 隔离。长资料使用
@@ -146,7 +156,13 @@ Provider API Key、模型 URL 或访问令牌。
 | `headline_kind` | `title` | 标题、开头、小标题或段首观点句 |
 | `formula_ids` | `[]` | 最多 20 个唯一公式 ID，每个最多 100 字符 |
 
-工具以项目资料为事实边界生成可比较候选，返回评分与方法信息；它不创建文字资产。
+工具按任务简报与确定性公式生成候选，返回评分与方法信息。生成开头、小标题或段首句时，
+`selected_title` 作为当前母稿主题；表达焦点依次使用 `keywords` 首项、`structure_override` 首节
+标题、已采用标题、首项事实资料标题和任务主题。明确关联的非 `style_reference` 资料最多取前 16 项、每项
+前 4000 字作为事实克制评分边界；在缺少自定义结构、关键词和已采用标题时，首项事实资料标题还会
+作为焦点兜底。确定性本地引擎不会从资料正文抽取新说法或改写为候选，避免把参考正文误当成已核定
+表述；`style_reference` 正文不进入本地候选或事实评分。工具不创建文字资产，响应中的
+`context_usage` 说明本次进入评分的事实资料 ID、排除的风格资料数量和单项摘录上限。
 
 `formula_ids` 是实际筛选条件，并非展示提示。留空时，服务先对当前 `headline_kind` 的完整公式
 目录评分，再截取 `count`；指定后，只对所选公式评分。大标题可选 `main-subtitle`、
@@ -161,8 +177,17 @@ Provider API Key、模型 URL 或访问令牌。
 
 | 字段 | 默认 | 限制 |
 | --- | --- | --- |
+| `brief_id` | 空 | 已保存项目简报 ID，1–128 字符；填写时完整规范化简报（包括 `material_ids`、`selected_title`、`structure_override`）必须与已存内容一致 |
 | `auto_review` | `true` | 是否在写作后运行审校步骤 |
 | `requested_exports` | `[]` | 最多 7 个唯一资产导出格式 |
+
+公共字段中的 `selected_title` 存在时工作流保留该标题，否则采用推荐候选；非空
+`structure_override` 作为工作流提纲与母稿的完整有序结构。
+
+省略 `brief_id` 时服务创建并保存新简报；传入时复用同项目的已保存简报。创建响应顶层
+返回 `brief_id`，工作流对象也返回同一 `brief_id`；客户端用它绑定后续资产、版本和审校结果。
+后续运行、查询、取消或恢复返回的 `workflow.brief_id` 保持不变；只有创建响应另外提供顶层
+`brief_id`。已保存的 `brief_id` 绑定项目和完整规范化内容；修改简报时使用新 ID，不跨项目复用。
 
 其余工作流工具：
 
@@ -297,7 +322,7 @@ DOI 只做规范化。文件或手工导入默认不设置 `metadata_verified`�
 - 指定新 `document_id` 时使用 `expected_version: 0`，更新时使用最新 `current_version`；
 - 文稿最大 500000 字符，文章最大 2000000 字符，常用分块为 500–20000 字符；
 - `gongwen_collect_articles` 的关键词 1–20 项、来源 1–10 项、`limit` 1–100；
-- `gongwen_get_style_references` 接受 1–8 个文章 ID，只把文章作为结构与表达参考；
+- `gongwen_get_style_references` 接受 1–8 个文章 ID，只把文章作为结构与表达参考，不作为正文事实或证据链来源；
 - 删除文稿/文章是持久化副作用；客户端先向用户复述目标 ID 与标题；
 - 导出工件默认 24 小时有效，过期后由原文稿和版本重新生成。
 
@@ -383,6 +408,8 @@ python scripts/package_connector.py dist
 | 类别 | 处理 |
 | --- | --- |
 | `invalid_request` | 按返回字段路径修正类型、枚举、长度或未定义字段 |
+| `brief_conflict` | 已保存的稳定简报 ID 对应不同内容；保留旧记录并为新内容使用新 ID |
+| `project_scope_error` | 核对项目 ID；该资源 ID 已绑定其他项目，不应跨项目复用 |
 | `not_found` | 核对项目、资料、资产、版本或文献 ID |
 | `operation_timeout` | 查询工作流或资源状态后，从明确步骤恢复 |
 | `internal_error` | 记录时间与错误类别，查看服务端脱敏日志 |
@@ -391,13 +418,15 @@ python scripts/package_connector.py dist
 | HTTP `429` | 遵循等待时间并缩小并发/查询范围 |
 
 只读工具可按同一参数重试。创建项目、添加资料、运行工作流、创建变体、导出、外部查询和旧删除
-工具具有副作用；超时后先读取状态或列表，确认结果是否已经落盘。版本更新采用最新版本号，避免
+工具具有副作用；超时后先读取状态或列表，确认结果是否已经落盘。`yanzhang_add_material`
+携带稳定 `material_id` 时可在同一项目内安全重放；省略时重试会创建新记录。版本更新采用最新版本号，避免
 覆盖其他客户端的新改动。
 
 ## 11. 数据与引用边界
 
 - 真实模型只接收当前步骤明确选中的任务内容和资料；`ModelProfile` 不保存密钥。
-- 文章来源用于学习结构、标题节奏与表达方法；正文事实仍以用户项目资料和证据链为准。
+- `kind=style_reference` 的项目资料（包括文章来源）只用于学习结构、标题节奏、语气和句式；
+  它不进入正文事实或证据链，正文事实仍以其他明确关联的项目资料和证据链为准。
 - Crossref、OpenAlex、arXiv 查询会发送检索词或文献标识；本地格式导入本身不发起查询。
 - DOI 规范化、`metadata_verified`、来源哈希、语义评分和参考文献排版各自表达不同证据层级。
 - 项目数据、浏览器站点数据、导出、备份和第三方供应商记录应分别管理。

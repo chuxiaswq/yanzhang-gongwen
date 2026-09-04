@@ -23,6 +23,7 @@ from yanzhang_core.exporters import (
 )
 from yanzhang_core.headlines import (
     CandidateBatch,
+    CandidateFactContext,
     CandidateRequest,
     CandidateScores,
     HeadlineFormula,
@@ -58,6 +59,7 @@ from yanzhang_core.models import (
     TextAsset,
     WritingBrief,
     WritingProject,
+    WritingStructureSection,
 )
 from yanzhang_core.packs import (
     ACADEMIC_PACK,
@@ -106,7 +108,9 @@ from yanzhang_core.provenance import (
     ProvenanceGraph,
     attach_material_evidence,
     build_provenance_graph,
+    checkable_fact_anchors,
     evidence_from_material,
+    supporting_evidence_for_text,
 )
 from yanzhang_core.reviews import (
     ReviewDimension,
@@ -132,6 +136,7 @@ from yanzhang_core.routing import (
 )
 from yanzhang_core.storage import (
     AuditEventRecord,
+    BriefConflictError,
     LegacyMigrationReport,
     ProjectScopeError,
     RecordNotFoundError,
@@ -167,7 +172,9 @@ __all__ = [
     "WORKPLACE_PACK",
     "AssetStatus",
     "AuditEventRecord",
+    "BriefConflictError",
     "CandidateBatch",
+    "CandidateFactContext",
     "CandidateRequest",
     "CandidateScores",
     "Channel",
@@ -261,10 +268,12 @@ __all__ = [
     "WritingProject",
     "WritingStorage",
     "WritingStorageError",
+    "WritingStructureSection",
     "YanzhangComposer",
     "YanzhangStorage",
     "attach_material_evidence",
     "build_provenance_graph",
+    "checkable_fact_anchors",
     "create_extension_registry",
     "evidence_from_material",
     "export_asset",
@@ -288,5 +297,6 @@ __all__ = [
     "score_candidate",
     "supported_export_formats",
     "supported_import_formats",
+    "supporting_evidence_for_text",
     "wire_workflow_step_extensions",
 ]

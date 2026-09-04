@@ -9,6 +9,7 @@
     />
     <title>砚章 · AI文字工作台</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/workspace_context.js" defer></script>
     <script src="/static/response_validators.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
@@ -192,12 +193,16 @@
           <details class="universal-brief" id="briefCard" open>
             <summary>
               <span><i>简</i><b>通用任务简报</b><small>一次填写，贯穿母稿、变体与审校</small></span>
-              <em id="briefCompletion">待完善</em>
+              <em
+                id="briefCompletion"
+                title="统计主题、写作目的、阅读对象、内容形态、首要渠道和写作配方"
+                aria-live="polite"
+              >待完善</em>
             </summary>
             <div class="brief-fields">
               <div class="brief-context-note">
                 <span>核心任务</span>
-                <p>主题、目标和阅读对象沿用下方写作设置；这里补充内容形态、交付渠道与边界。</p>
+                <p>主题、目标和阅读对象沿用下方写作设置；这里补充内容形态与交付渠道。日期、关键词和约束均为选填项。</p>
               </div>
               <div class="form-row split">
                 <label class="field compact-field"><span>内容形态</span><select id="briefContentType"><option value="official-document">规范公文</option><option value="leadership-speech">领导讲话</option><option value="research-report">调研报告</option><option value="news-release">新闻通稿</option><option value="academic-paper">学术论文</option><option value="general-writing">通用长文</option></select></label>
@@ -208,7 +213,7 @@
                 <label class="field compact-field"><span>写作配方</span><select id="briefRecipe"><option value="implementation-plan">实施方案</option><option value="work-summary">工作总结</option><option value="briefing-material">汇报材料</option><option value="meeting-minutes">会议纪要</option></select></label>
               </div>
               <div class="form-row split">
-                <label class="field compact-field"><span>交付日期</span><input id="briefDeadline" type="date" /></label>
+                <label class="field compact-field"><span>交付日期 <i class="optional-label">选填</i></span><input id="briefDeadline" type="text" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="YYYY-MM-DD" aria-label="交付日期，格式为年-月-日" /></label>
                 <label class="field compact-field"><span>目标语言</span><select id="briefLanguage"><option value="zh-CN">中文</option><option value="zh-en">中英双语</option><option value="en">英文</option></select></label>
               </div>
               <label class="field compact-field"><span>表达关键词</span><input id="briefKeywords" maxlength="180" placeholder="例如：务实、改革、为民、闭环" /></label>
@@ -227,8 +232,8 @@
           <form id="writingForm" autocomplete="off">
             <div class="form-row split">
               <label class="field">
-                <span>文种</span>
-                <select id="documentType" name="document_type">
+                <span>成果类型 · 随写作配方同步</span>
+                <select id="documentType" name="document_type" disabled aria-label="成果类型，由写作配方自动确定">
                   <option value="通知">通知</option>
                   <option value="请示">请示</option>
                   <option value="报告">报告</option>
@@ -515,7 +520,7 @@
                 <div class="paper" id="paper">
                   <div class="paper-meta">
                     <span id="paperType">实施方案</span>
-                    <span>草稿</span>
+                    <span id="documentContextStatus">草稿</span>
                   </div>
                   <textarea class="paper-title" id="documentTitle" rows="2" maxlength="300" aria-label="公文标题" placeholder="在此输入标题"></textarea>
                   <div

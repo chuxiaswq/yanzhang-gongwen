@@ -878,6 +878,38 @@ svg {
   gap: 5px;
 }
 
+.fact-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.fact-group-marker {
+  width: 3px;
+  height: 12px;
+  flex: 0 0 auto;
+  background: #b58a49;
+  border-radius: 999px;
+}
+
+.fact-group-tasks .fact-values {
+  display: grid;
+}
+
+.fact-group-tasks .fact-values span {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .fact-group-label,
 .fact-group > strong {
   color: var(--ink-600);
@@ -908,6 +940,10 @@ svg {
   font-weight: 500;
   line-height: 1.4;
   text-overflow: ellipsis;
+}
+
+.fact-group:not(.fact-group-tasks) .fact-values span {
+  white-space: nowrap;
 }
 
 .fact-lock {
@@ -1412,6 +1448,16 @@ svg {
   border: 1px solid #ecdcd7;
   border-radius: 999px;
   letter-spacing: 0;
+}
+
+.paper-meta #documentContextStatus.is-stale {
+  color: #8a4b20;
+  background: #fff3df;
+  border-color: rgba(138, 75, 32, 0.24);
+}
+
+.document-workspace.has-stale-context .paper {
+  box-shadow: 0 0 0 2px rgba(163, 96, 43, 0.12), var(--shadow-paper);
 }
 
 .paper-title {
@@ -5247,6 +5293,14 @@ body.focus-mode .paper {
 .compact-field {
   gap: 5px;
   margin: 0;
+}
+
+.optional-label {
+  margin-left: 3px;
+  color: var(--ink-400);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 500;
 }
 
 .compact-field input,

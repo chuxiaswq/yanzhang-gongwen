@@ -87,6 +87,15 @@ def _clean_unique(values: tuple[str, ...], *, field_name: str) -> tuple[str, ...
     return cleaned
 
 
+class WritingStructureSection(CoreModel):
+    """One bounded section supplied as an explicit writing-structure override."""
+
+    id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=100)
+    purpose: str = Field(min_length=1, max_length=500)
+    required: bool = True
+
+
 class WritingBrief(CoreModel):
     """A complete, channel-independent description of one writing task."""
 
@@ -105,11 +114,26 @@ class WritingBrief(CoreModel):
     keywords: tuple[str, ...] = Field(default=(), max_length=32)
     knowledge_item_ids: tuple[str, ...] = Field(default=(), max_length=128)
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    selected_title: str | None = Field(default=None, min_length=1, max_length=300)
+    structure_override: tuple[WritingStructureSection, ...] = Field(default=(), max_length=24)
 
     @field_validator("constraints", "keywords", "knowledge_item_ids")
     @classmethod
     def validate_unique_values(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         return _clean_unique(values, field_name="列表字段")
+
+    @field_validator("structure_override")
+    @classmethod
+    def validate_structure_override(
+        cls, values: tuple[WritingStructureSection, ...]
+    ) -> tuple[WritingStructureSection, ...]:
+        ids = tuple(value.id for value in values)
+        titles = tuple(value.title for value in values)
+        if len(ids) != len(set(ids)):
+            raise ValueError("structure_override 的章节标识不得重复")
+        if len(titles) != len(set(titles)):
+            raise ValueError("structure_override 的章节标题不得重复")
+        return values
 
 
 class WritingProject(CoreModel):

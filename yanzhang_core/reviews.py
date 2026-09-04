@@ -19,6 +19,7 @@ from yanzhang_core.models import (
     TextAsset,
     WritingBrief,
 )
+from yanzhang_core.provenance import checkable_fact_anchors
 
 type ReviewDimension = Literal[
     "evidence",
@@ -131,7 +132,10 @@ def run_review(request: ReviewRequest) -> ReviewReport:
         raw_issues.append((dimension, severity, block.id if block else None, message, suggestion))
 
     asset = request.asset
-    evidence_ids = {item.id for item in request.evidence}
+    structural_topic = request.brief.title if request.brief is not None else None
+    evidence_by_id = {item.id: item for item in request.evidence}
+    evidence_anchors = {item.id: checkable_fact_anchors(item.excerpt) for item in request.evidence}
+    evidence_ids = set(evidence_by_id)
     claim_like_count = 0
     cited_claim_like_count = 0
 
@@ -139,14 +143,35 @@ def run_review(request: ReviewRequest) -> ReviewReport:
         numbers = _NUMBER.findall(block.text)
         if numbers:
             claim_like_count += 1
-            if block.evidence_ids:
+            linked_evidence = tuple(
+                evidence_by_id[evidence_id]
+                for evidence_id in block.evidence_ids
+                if evidence_id in evidence_by_id
+            )
+            required_anchors = checkable_fact_anchors(
+                block.text,
+                structural_topic=structural_topic,
+            )
+            available_anchors = frozenset().union(
+                *(evidence_anchors[item.id] for item in linked_evidence)
+            )
+            if (
+                block.evidence_ids
+                and len(linked_evidence) == len(block.evidence_ids)
+                and required_anchors.issubset(available_anchors)
+            ):
                 cited_claim_like_count += 1
             else:
+                message = (
+                    f"包含 {len(numbers)} 项数字表达，但本段尚未关联证据。"
+                    if not block.evidence_ids
+                    else f"包含 {len(numbers)} 项数字表达，但已关联证据未覆盖全部事实锚点。"
+                )
                 add(
                     "evidence",
                     "warning",
                     block,
-                    f"包含 {len(numbers)} 项数字表达，但本段尚未关联证据。",
+                    message,
                     "为数字、比例、日期或数量补充来源定位，或改为明确的待核实标记。",
                 )
         missing_ids = tuple(item for item in block.evidence_ids if item not in evidence_ids)

@@ -267,6 +267,93 @@ def test_project_material_workflow_asset_review_export_cycle(client: TestClient)
     assert client.get(f"/api/v2/projects/{project_id}/terms").json()["items"] == []
 
 
+def test_headline_http_uses_brief_context_and_excludes_style_materials(
+    client: TestClient,
+) -> None:
+    project_id = client.post(
+        "/api/v2/projects",
+        json={"name": "表达上下文测试", "scenario_pack_id": "gongwen"},
+    ).json()["project"]["id"]
+    fact_material_id = client.post(
+        f"/api/v2/projects/{project_id}/materials",
+        json={
+            "title": "核定调研台账",
+            "content": "经核对，已完成12项任务。",
+            "kind": "source",
+        },
+    ).json()["material"]["id"]
+    style_material_id = client.post(
+        f"/api/v2/projects/{project_id}/materials",
+        json={
+            "title": "不应成为事实焦点的范文",
+            "content": "示例文章宣称完成999项任务。",
+            "kind": "style_reference",
+        },
+    ).json()["material"]["id"]
+    brief = {
+        "topic": "年度工作复盘",
+        "goal": "形成面向干部的总结",
+        "audience": "机关干部",
+        "content_type": "工作总结",
+        "scenario_pack_id": "gongwen",
+        "recipe_id": "work-summary",
+        "material_ids": [style_material_id, fact_material_id],
+        "count": 1,
+        "formula_ids": ["direct"],
+    }
+
+    opening = client.post(
+        f"/api/v2/projects/{project_id}/headlines",
+        json={
+            **brief,
+            "headline_kind": "opening",
+            "selected_title": "以实干实绩答好年度复盘之问",
+            "structure_override": [
+                {
+                    "id": "progress",
+                    "title": "一、主要进展",
+                    "purpose": "概括已经核定的进展。",
+                }
+            ],
+        },
+    )
+    assert opening.status_code == 200
+    assert opening.json()["candidate_batch"]["recommended"].startswith(
+        "围绕以实干实绩答好年度复盘之问"
+    )
+
+    heading = client.post(
+        f"/api/v2/projects/{project_id}/headlines",
+        json={
+            **brief,
+            "headline_kind": "section_heading",
+            "selected_title": "以实干实绩答好年度复盘之问",
+            "structure_override": [
+                {
+                    "id": "progress",
+                    "title": "一、主要进展",
+                    "purpose": "概括已经核定的进展。",
+                }
+            ],
+        },
+    )
+    assert heading.status_code == 200
+    assert heading.json()["candidate_batch"]["recommended"] == "一、主要进展"
+
+    material_fallback = client.post(
+        f"/api/v2/projects/{project_id}/headlines",
+        json={**brief, "headline_kind": "section_heading"},
+    )
+    assert material_fallback.status_code == 200
+    response = material_fallback.json()
+    assert response["candidate_batch"]["recommended"] == "核定调研台账"
+    assert response["context_usage"] == {
+        "factual_material_ids": [fact_material_id],
+        "excluded_style_reference_count": 1,
+        "fact_excerpt_limit": 4_000,
+    }
+
+
 def test_workflow_http_operations_hide_cross_project_identifiers(client: TestClient) -> None:
     first = client.post(
         "/api/v2/projects",

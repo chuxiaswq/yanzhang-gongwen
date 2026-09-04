@@ -56,11 +56,12 @@
 
 | 场景包 | 配方 ID |
 | --- | --- |
-| 公文与综合材料 `gongwen` | `work-summary`、`briefing-material`、`implementation-plan`、`meeting-minutes` |
+| 公文与综合材料 `gongwen` | `work-summary`、`briefing-material`、`leadership-speech`、`research-report`、`implementation-plan`、`meeting-minutes` |
 | 职场沟通 `workplace` | `work-email`、`weekly-report`、`business-proposal`、`meeting-followup`、`presentation-outline` |
 | 内容传播 `media` | `press-release`、`wechat-article`、`social-post`、`short-video-script` |
 | 学术与研究写作 `academic` | `literature-review`、`research-outline`、`research-abstract`、`reviewer-response` |
 
+四个场景包共 19 个配方；`leadership-speech` 对应领导讲话，`research-report` 对应调研报告。
 每个配方声明所需输入、章节用途、适用渠道、默认标题类型、输出格式和事实策略。任务简报必须与
 所选场景包、配方和渠道匹配；无模型配置时，同一配方也能产生确定性本地草稿，便于离线验收。
 
@@ -68,18 +69,22 @@
 
 1. **建项目**：`WritingProject` 隔离任务、资料、词表、资产和审计事件。
 2. **填任务简报**：`WritingBrief` 固化目标、受众、渠道、文种、语气、篇幅、约束、关键词、
-   配方和关联资料 ID。
+   配方、关联资料 ID、已采用标题 `selected_title` 和可选的有序结构 `structure_override`。
 3. **整理项目资料**：`KnowledgeItem` 保存来源、风格参考、历史稿、术语或笔记；解析器将 TXT、
-   Markdown、HTML、DOCX 与可选 PDF 转成受限文本。全文检索仅在当前项目内返回结果。
+   Markdown、HTML、DOCX 与可选 PDF 转成受限文本。全文检索仅在当前项目内返回结果。调用方可指定
+   稳定 `material_id` 做项目内幂等 upsert；`style_reference` 只进入结构、语气和句式特征上下文，
+   不作为正文事实或证据。
 4. **做标题与开头实验**：标题引擎按 `title`、`opening`、`section_heading` 或
    `topic_sentence` 生成全部合格公式、全局评分后截取候选；`formula_ids` 可严格筛选公式目录。
    排比、对偶、递进、主副题及三段/四段结构以公式元数据公开，候选记录公式名、修辞标签与
-   七维评分理由，便于解释和复现。
-5. **生成母稿**：配方规划有序 `ContentBlock`；组合器读取明确关联且经过字符上限裁剪的资料，
-   生成 `TextAsset` 与首个不可变 `Revision`。
+   七维评分理由，便于解释和复现。非标题表达以已采用标题作为当前母稿主题，并按显式关键词、
+   自定义结构首节、已采用标题、事实资料标题的顺序解析焦点。关联事实资料只以受限摘录参与
+   事实克制评分；确定性引擎不从资料正文抽取新表述，风格资料不进入候选事实边界。
+5. **生成母稿**：配方或简报的 `structure_override` 规划有序 `ContentBlock`；组合器读取明确关联
+   且经过字符上限裁剪的资料，并优先使用 `selected_title`，生成 `TextAsset` 与首个不可变 `Revision`。
 6. **派生渠道变体**：变体通过 `parent_asset_id` 指向母稿，以目标 `channel` 保存；母稿与各变体
    分别维护版本，避免一次修改覆盖所有渠道。
-7. **建立证据链**：直接成稿和持久化工作流都先把明确选择的项目资料转为带内容哈希与定位的
+7. **建立证据链**：直接成稿和持久化工作流都先把明确选择的非 `style_reference` 项目资料转为带内容哈希与定位的
    `Evidence`，再把证据 ID 写入内容块，从块提取 `Claim` 并通过 `Citation` 持久化关联。
    学术场景另用 `BibliographicRecord`、`EvidenceSnippet` 与 `ClaimCitationLink` 承载更细的
    来源哈希和页码、段落或字符定位。
@@ -94,7 +99,7 @@
 
 ```text
 WritingProject
- ├─ WritingBrief ── knowledge_item_ids ──> KnowledgeItem ──> Evidence
+ ├─ WritingBrief ── knowledge_item_ids ──> KnowledgeItem ──> Evidence (kind != style_reference)
  ├─ ProjectTerm
  ├─ TextAsset (master)
  │    ├─ ContentBlock[]
@@ -116,6 +121,10 @@ ArtifactMetadata sidecar
 - 通用审校使用内容块上的证据 ID 计算数字论断覆盖率；引用矩阵 CSV 输出资料 ID、
   定位、来源 URL、来源哈希和证据摘录，便于回查。
 - 工作流步骤、模型画像、父资产和生成元数据记录在版本或工作流关系上，便于复盘来源。
+- `brief_id` 在首次保存时绑定项目与完整规范化内容，此后不可变；相同内容重放是幂等读取，内容冲突
+  和跨项目复用分别通过稳定、脱敏的 `brief_conflict` 与 `project_scope_error` 边界报告。
+- 工作流创建可传入已保存的 `brief_id`；服务校验完整简报与已存内容一致，并在创建响应及工作流投影中
+  返回同一 `brief_id`，供客户端绑定母稿、版本与审校结果。
 - v0.2 工作流的运行、查询、取消和恢复均按 `project_id` 查找；跨项目标识与缺失标识使用同一
   未找到结果。远端异常只保存稳定错误码与脱敏摘要，不把上游正文、URL 或凭据写入步骤状态。
 - v0.2 导出 sidecar 同时记录项目、资产、修订和创建操作；HTTP 与 MCP 资源读取必须携带并校验

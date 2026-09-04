@@ -47,6 +47,10 @@ class RevisionConflictError(WritingStorageError):
     """Raised when an asset revision changed since the caller read it."""
 
 
+class BriefConflictError(WritingStorageError):
+    """Raised when a stable brief id is reused for different normalized content."""
+
+
 class ProjectScopeError(WritingStorageError):
     """Raised when linked records belong to different projects."""
 
@@ -286,21 +290,8 @@ class WritingStorage:
     def save_brief(self, brief: WritingBrief, *, project_id: str | None = None) -> WritingBrief:
         """Persist a complete immutable brief payload under its stable id."""
 
-        now = _utc_now()
         with self.write_transaction() as connection:
-            _validate_brief_project(connection, brief.id, project_id)
-            connection.execute(
-                """
-                INSERT INTO writing_briefs(id, project_id, payload_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    project_id=COALESCE(excluded.project_id, writing_briefs.project_id),
-                    payload_json=excluded.payload_json,
-                    updated_at=excluded.updated_at
-                """,
-                (brief.id, project_id, _dump_model(brief), now, now),
-            )
-        return brief
+            return _insert_or_validate_brief(connection, brief, project_id=project_id)
 
     def get_brief(self, brief_id: str, *, project_id: str | None = None) -> WritingBrief:
         where = "id=? AND project_id=?" if project_id is not None else "id=?"
@@ -371,10 +362,9 @@ class WritingStorage:
             created_at=asset.created_at,
         )
         with self.write_transaction() as connection:
-            _validate_brief_project(connection, brief.id, project_id)
             if project_id is not None and parent_asset_id is not None:
                 _validate_asset_project(connection, parent_asset_id, project_id)
-            _upsert_brief(connection, brief, project_id=project_id)
+            _insert_or_validate_brief(connection, brief, project_id=project_id)
             connection.execute(
                 """
                 INSERT INTO text_assets(
@@ -824,24 +814,46 @@ def _validate_asset_project(
         raise ProjectScopeError(f"text asset does not belong to project: {asset_id}")
 
 
-def _upsert_brief(
+def _insert_or_validate_brief(
     connection: sqlite3.Connection,
     brief: WritingBrief,
     *,
     project_id: str | None,
-) -> None:
+) -> WritingBrief:
+    """Atomically insert one immutable brief or return its identical stored value."""
+
+    _validate_brief_project(connection, brief.id, project_id)
     now = _utc_now()
-    connection.execute(
+    inserted = connection.execute(
         """
         INSERT INTO writing_briefs(id, project_id, payload_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            project_id=COALESCE(excluded.project_id, writing_briefs.project_id),
-            payload_json=excluded.payload_json,
-            updated_at=excluded.updated_at
+        ON CONFLICT(id) DO NOTHING
         """,
         (brief.id, project_id, _dump_model(brief), now, now),
     )
+    if inserted.rowcount == 1:
+        return brief
+
+    row = connection.execute(
+        "SELECT project_id, payload_json FROM writing_briefs WHERE id=?",
+        (brief.id,),
+    ).fetchone()
+    if row is None:
+        raise WritingStorageError(f"brief insert lost without a stored row: {brief.id}")
+
+    stored = WritingBrief.model_validate_json(str(row["payload_json"]))
+    if stored != brief:
+        raise BriefConflictError(f"brief content conflicts with stored id: {brief.id}")
+
+    current_project = str(row["project_id"]) if row["project_id"] is not None else None
+    if current_project is None and project_id is not None:
+        connection.execute(
+            "UPDATE writing_briefs SET project_id=?, updated_at=? "
+            "WHERE id=? AND project_id IS NULL",
+            (project_id, now, brief.id),
+        )
+    return stored
 
 
 def _insert_revision(

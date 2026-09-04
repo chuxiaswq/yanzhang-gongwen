@@ -32,6 +32,14 @@ type RhetoricalTechnique = Literal[
 ]
 
 
+class CandidateFactContext(CoreModel):
+    """One bounded factual material excerpt available to candidate scoring."""
+
+    material_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
+    excerpt: str = Field(min_length=1, max_length=4_000)
+
+
 class CandidateRequest(CoreModel):
     """Inputs for title, opening, section-heading, or topic-sentence work."""
 
@@ -41,6 +49,7 @@ class CandidateRequest(CoreModel):
     count: int = Field(default=5, ge=1, le=12)
     required_terms: tuple[str, ...] = Field(default=(), max_length=16)
     formula_ids: tuple[str, ...] = Field(default=(), max_length=20)
+    fact_contexts: tuple[CandidateFactContext, ...] = Field(default=(), max_length=16)
 
     @field_validator("required_terms", "formula_ids")
     @classmethod
@@ -59,6 +68,17 @@ class CandidateRequest(CoreModel):
         if unknown:
             raise ValueError(f"formula_ids 含有不适用于 {self.kind} 的公式：{', '.join(unknown)}")
         return self
+
+    @field_validator("fact_contexts")
+    @classmethod
+    def validate_unique_fact_contexts(
+        cls,
+        values: tuple[CandidateFactContext, ...],
+    ) -> tuple[CandidateFactContext, ...]:
+        material_ids = tuple(value.material_id for value in values)
+        if len(material_ids) != len(set(material_ids)):
+            raise ValueError("fact_contexts 的资料标识不得重复")
+        return values
 
 
 class HeadlineFormula(CoreModel):
@@ -595,8 +615,12 @@ def score_candidate(text: str, request: CandidateRequest) -> CandidateScores:
     """Score user- or engine-supplied entry text using the same local contract."""
 
     value = _normalize_text(text)
-    topic = request.brief.title
-    terms = (topic, *request.brief.keywords, *request.required_terms)
+    topic = _context_topic(request)
+    terms = (
+        topic,
+        *request.brief.keywords,
+        *request.required_terms,
+    )
     relevant_terms = tuple(term for term in terms if term)
     matches = sum(term in value for term in relevant_terms)
     relevance = (
@@ -642,9 +666,14 @@ def score_candidate(text: str, request: CandidateRequest) -> CandidateScores:
     source_text = " ".join(
         (
             request.brief.title,
+            request.brief.selected_title or "",
             request.brief.goal,
             *request.brief.constraints,
             *request.brief.keywords,
+            *(section.title for section in request.brief.structure_override),
+            *(section.purpose for section in request.brief.structure_override),
+            *(context.title for context in request.fact_contexts),
+            *(context.excerpt for context in request.fact_contexts),
         )
     )
     unsupported_numbers = tuple(
@@ -708,14 +737,39 @@ def generate_topic_sentences(
 
 def _template_context(request: CandidateRequest) -> dict[str, str]:
     brief = request.brief
-    focus = request.section_topic or (brief.keywords[0] if brief.keywords else brief.title)
+    focus = _context_focus(request)
     return {
-        "topic": brief.title,
+        "topic": _context_topic(request),
         "goal": brief.goal.rstrip("。！？"),
         "audience": brief.audience,
         "content_type": brief.content_type,
         "focus": focus,
     }
+
+
+def _context_topic(request: CandidateRequest) -> str:
+    """Keep title alternatives neutral while grounding later expressions in the adopted title."""
+
+    if request.kind != "title" and request.brief.selected_title:
+        return request.brief.selected_title
+    return request.brief.title
+
+
+def _context_focus(request: CandidateRequest) -> str:
+    """Resolve the strongest explicit focus before using conservative fallbacks."""
+
+    brief = request.brief
+    if request.section_topic:
+        return request.section_topic
+    if brief.keywords:
+        return brief.keywords[0]
+    if brief.structure_override:
+        return brief.structure_override[0].title
+    if brief.selected_title and request.kind != "title":
+        return brief.selected_title
+    if request.fact_contexts:
+        return request.fact_contexts[0].title
+    return brief.title
 
 
 def _normalize_text(value: str) -> str:
@@ -764,6 +818,7 @@ def _bound(value: int) -> int:
 
 __all__ = [
     "CandidateBatch",
+    "CandidateFactContext",
     "CandidateRequest",
     "CandidateScores",
     "HeadlineFormula",

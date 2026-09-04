@@ -133,6 +133,53 @@ async def test_formal_server_runs_persistent_project_to_export_workflow(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_formal_mcp_headlines_apply_adopted_title_and_structure(tmp_path: Path) -> None:
+    context = build_context(settings=RuntimeSettings(environment="test"), data_dir=tmp_path)
+    try:
+        server = create_server(context)
+        _, project_value = await server.call_tool(
+            "yanzhang_create_project",
+            {"name": "标题上下文测试", "scenario_pack_id": "gongwen"},
+        )
+        project_id = cast(str, _result(_result(project_value)["project"])["id"])
+        common: dict[str, object] = {
+            "project_id": project_id,
+            "topic": "年度工作复盘",
+            "goal": "形成面向干部的总结",
+            "audience": "机关干部",
+            "content_type": "工作总结",
+            "scenario_pack_id": "gongwen",
+            "recipe_id": "work-summary",
+            "selected_title": "以实干实绩答好年度复盘之问",
+            "structure_override": [
+                {
+                    "id": "progress",
+                    "title": "一、主要进展",
+                    "purpose": "概括已经核定的进展。",
+                }
+            ],
+            "count": 1,
+            "formula_ids": ["direct"],
+        }
+
+        _, opening_value = await server.call_tool(
+            "yanzhang_generate_titles",
+            {**common, "headline_kind": "opening"},
+        )
+        opening = _result(_result(opening_value)["candidate_batch"])
+        _, heading_value = await server.call_tool(
+            "yanzhang_generate_titles",
+            {**common, "headline_kind": "section_heading"},
+        )
+        heading = _result(_result(heading_value)["candidate_batch"])
+
+        assert cast(str, opening["recommended"]).startswith("围绕以实干实绩答好年度复盘之问")
+        assert heading["recommended"] == "一、主要进展"
+    finally:
+        context.close()
+
+
+@pytest.mark.asyncio
 async def test_formal_yanzhang_errors_do_not_reflect_unknown_fields(tmp_path: Path) -> None:
     context = build_context(
         settings=RuntimeSettings(environment="test"),

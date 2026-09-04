@@ -81,7 +81,14 @@ class KnowledgeRepository:
                 "INSERT INTO knowledge_items_fts(item_id, title, content) VALUES (?, ?, ?)",
                 (item.id, item.title, item.content),
             )
-        return item
+            persisted = connection.execute(
+                "SELECT * FROM knowledge_items WHERE id=?",
+                (item.id,),
+            ).fetchone()
+            if persisted is None:
+                raise WritingStorageError(f"knowledge item upsert lost stored row: {item.id}")
+            saved = _knowledge_item_from_row(persisted)
+        return saved
 
     def get_item(self, item_id: str, *, project_id: str | None = None) -> KnowledgeItem:
         where = "id=? AND project_id=?" if project_id is not None else "id=?"

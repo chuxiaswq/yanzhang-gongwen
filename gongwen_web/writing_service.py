@@ -47,7 +47,7 @@ from yanzhang_core.exporters import (
 from yanzhang_core.exporters import (
     export_asset as export_core_asset,
 )
-from yanzhang_core.headlines import CandidateRequest, generate_candidates
+from yanzhang_core.headlines import CandidateFactContext, CandidateRequest, generate_candidates
 from yanzhang_core.knowledge import KnowledgeRepository, KnowledgeSearchResult
 from yanzhang_core.models import (
     Channel,
@@ -60,7 +60,14 @@ from yanzhang_core.models import (
     WritingBrief,
     WritingProject,
 )
-from yanzhang_core.packs import get_recipe, get_scenario_pack, list_recipes, list_scenario_packs
+from yanzhang_core.packs import (
+    RecipeDefinition,
+    RecipeSection,
+    get_recipe,
+    get_scenario_pack,
+    list_recipes,
+    list_scenario_packs,
+)
 from yanzhang_core.parsers import parse_document, supported_import_formats
 from yanzhang_core.plugins import ExtensionDiscoveryReport, ExtensionRegistry
 from yanzhang_core.provenance import (
@@ -76,7 +83,12 @@ from yanzhang_core.routing import (
     RoutingPresetName,
     route_model,
 )
-from yanzhang_core.storage import RecordNotFoundError, WorkflowRunRecord, WritingStorage
+from yanzhang_core.storage import (
+    BriefConflictError,
+    RecordNotFoundError,
+    WorkflowRunRecord,
+    WritingStorage,
+)
 from yanzhang_core.workflow import (
     StepContext,
     StepResult,
@@ -379,16 +391,18 @@ class YanzhangPlatformService:
         values = _payload(request)
         project_id = _required_str(values, "project_id")
         await self._project(project_id)
-        item = KnowledgeItem.model_validate(
-            {
-                "project_id": project_id,
-                "title": _required_str(values, "title"),
-                "content": _required_str(values, "content"),
-                "kind": _required_str(values, "kind", default="source"),
-                "source_url": _required_str(values, "source_url", default=""),
-                "tags": _str_sequence(values, "tags"),
-            }
-        )
+        payload: dict[str, object] = {
+            "project_id": project_id,
+            "title": _required_str(values, "title"),
+            "content": _required_str(values, "content"),
+            "kind": _required_str(values, "kind", default="source"),
+            "source_url": _required_str(values, "source_url", default=""),
+            "tags": _str_sequence(values, "tags"),
+        }
+        material_id = _optional_str(values, "material_id")
+        if material_id is not None:
+            payload["id"] = material_id
+        item = KnowledgeItem.model_validate(payload)
         saved = await asyncio.to_thread(self.knowledge.upsert_item, item)
         return {"material": _model(saved)}
 
@@ -499,15 +513,19 @@ class YanzhangPlatformService:
         await self._project(project_id)
         brief = self._brief(values)
         await self._validate_material_ids(project_id, brief.knowledge_item_ids)
-        saved = await asyncio.to_thread(self.storage.save_brief, brief, project_id=project_id)
-        return {"brief": _model(saved)}
+        try:
+            saved = await asyncio.to_thread(self.storage.save_brief, brief, project_id=project_id)
+        except BriefConflictError:
+            raise BriefConflictError("stable brief id is already bound to other content") from None
+        return {"brief": _model(saved), "brief_id": saved.id}
 
     async def yanzhang_generate_titles(self, request: RequestInput) -> PlatformResult:
         values = _payload(request)
         project_id = _required_str(values, "project_id")
         await self._project(project_id)
         brief = self._brief(values)
-        await self._validate_material_ids(project_id, brief.knowledge_item_ids)
+        materials = await self._materials(project_id, brief.knowledge_item_ids)
+        fact_materials = _fact_materials(materials)
         requested_count = _integer(values, "count", default=8)
         candidate_request = CandidateRequest.model_validate(
             {
@@ -516,6 +534,14 @@ class YanzhangPlatformService:
                 "count": requested_count,
                 "required_terms": _str_sequence(values, "keywords")[:16],
                 "formula_ids": _str_sequence(values, "formula_ids"),
+                "fact_contexts": [
+                    CandidateFactContext(
+                        material_id=item.id,
+                        title=item.title,
+                        excerpt=item.content[:4_000],
+                    )
+                    for item in fact_materials[:16]
+                ],
             }
         )
         batch = await asyncio.to_thread(generate_candidates, candidate_request)
@@ -523,6 +549,11 @@ class YanzhangPlatformService:
             "candidate_batch": _model(batch),
             "requested_count": requested_count,
             "generation_mode": "local",
+            "context_usage": {
+                "factual_material_ids": [item.id for item in fact_materials[:16]],
+                "excluded_style_reference_count": len(materials) - len(fact_materials),
+                "fact_excerpt_limit": 4_000,
+            },
         }
 
     async def yanzhang_create_workflow(self, request: RequestInput) -> PlatformResult:
@@ -531,7 +562,14 @@ class YanzhangPlatformService:
         await self._project(project_id)
         brief = self._brief(values)
         await self._validate_material_ids(project_id, brief.knowledge_item_ids)
-        await asyncio.to_thread(self.storage.save_brief, brief, project_id=project_id)
+        requested_brief_id = _optional_str(values, "brief_id")
+        if requested_brief_id is None:
+            await asyncio.to_thread(self.storage.save_brief, brief, project_id=project_id)
+        else:
+            saved_brief = await self._brief_for_project(project_id, requested_brief_id)
+            if saved_brief != brief:
+                raise ValueError("已保存简报与当前工作流输入不一致，请先保存新的任务简报")
+            brief = saved_brief
         decision = self._route(brief.model_profile_id, request_live=self.composer.live_available)
         run = await asyncio.to_thread(
             self.workflow_engine.create_run,
@@ -546,7 +584,11 @@ class YanzhangPlatformService:
             },
             project_id=project_id,
         )
-        return {"workflow": await self._workflow_payload(run), "resolved_route": _model(decision)}
+        return {
+            "workflow": await self._workflow_payload(run),
+            "brief_id": brief.id,
+            "resolved_route": _model(decision),
+        }
 
     async def yanzhang_run_workflow(self, request: RequestInput) -> PlatformResult:
         values = _payload(request)
@@ -700,13 +742,13 @@ class YanzhangPlatformService:
         requested_live = _boolean(values, "live", default=False)
         decision = self._route(brief.model_profile_id, request_live=requested_live)
         live = self._live_mode(requested_live, decision)
-        recipe = get_recipe(brief.recipe_id, pack_id=brief.scenario_pack_id)
+        recipe = _effective_recipe(brief)
         draft = await self.composer.compose(
             brief,
             recipe,
             knowledge,
             live=live,
-            title=_optional_str(values, "title"),
+            title=_optional_str(values, "title") or brief.selected_title,
         )
         asset = await self._create_traced_asset(
             brief=brief,
@@ -1397,7 +1439,7 @@ class YanzhangPlatformService:
         project_id: str,
         materials: Sequence[KnowledgeItem],
     ) -> tuple[Evidence, ...]:
-        evidence = tuple(evidence_from_material(item) for item in materials)
+        evidence = tuple(evidence_from_material(item) for item in _fact_materials(materials))
         for item in evidence:
             await asyncio.to_thread(self.knowledge.add_evidence, item, project_id=project_id)
         return evidence
@@ -1414,8 +1456,13 @@ class YanzhangPlatformService:
         model_profile_id: str | None,
         metadata: Mapping[str, object],
     ) -> TextAsset:
-        linked_blocks, _ = attach_material_evidence(blocks, materials)
-        await self._persist_material_evidence(project_id, materials)
+        fact_materials = _fact_materials(materials)
+        linked_blocks, _ = attach_material_evidence(
+            blocks,
+            fact_materials,
+            structural_topic=brief.title,
+        )
+        await self._persist_material_evidence(project_id, fact_materials)
         asset = await asyncio.to_thread(
             self.storage.create_text_asset,
             brief,
@@ -1426,7 +1473,11 @@ class YanzhangPlatformService:
             model_profile_id=model_profile_id,
             metadata=metadata,
         )
-        graph = build_provenance_graph(asset, materials)
+        graph = build_provenance_graph(
+            asset,
+            fact_materials,
+            structural_topic=brief.title,
+        )
         await asyncio.to_thread(_persist_provenance_graph, self.knowledge, graph, project_id)
         return asset
 
@@ -1575,7 +1626,11 @@ class YanzhangPlatformService:
         channel = _required_str(values, "channel", default="document")
         if channel not in recipe.channels:
             raise ValueError("所选配方不支持指定输出渠道")
-        content_type = _required_str(values, "content_type", default=recipe.content_type)
+        # The executable recipe is the canonical output type.  Accepting an older
+        # client-provided label remains backwards compatible, while preventing a
+        # brief/asset from claiming a type that its selected recipe does not create.
+        _required_str(values, "content_type", default=recipe.content_type)
+        content_type = recipe.content_type
         title = _optional_str(values, "topic") or _required_str(values, "title")
         payload: dict[str, object] = {
             "title": title,
@@ -1594,6 +1649,8 @@ class YanzhangPlatformService:
                 values, "material_ids", fallback="knowledge_item_ids"
             ),
             "model_profile_id": _optional_str(values, "model_profile_id"),
+            "selected_title": _optional_str(values, "selected_title"),
+            "structure_override": values.get("structure_override", ()),
         }
         brief_id = _optional_str(values, "brief_id") or _optional_str(values, "id")
         if brief_id is not None:
@@ -1637,7 +1694,13 @@ class YanzhangPlatformService:
             run["id"],
             project_id=project_id,
         )
-        return {**dict(run), "steps": [dict(step) for step in steps]}
+        payload: dict[str, object] = {**dict(run), "steps": [dict(step) for step in steps]}
+        raw_brief = run["input"].get("brief")
+        if isinstance(raw_brief, Mapping):
+            brief_id = raw_brief.get("id")
+            if isinstance(brief_id, str) and brief_id:
+                payload["brief_id"] = brief_id
+        return payload
 
     async def _workflow_research(self, context: StepContext) -> StepResult:
         brief = WritingBrief.model_validate(context.input["brief"])
@@ -1661,14 +1724,15 @@ class YanzhangPlatformService:
         batch = await asyncio.to_thread(
             generate_candidates, CandidateRequest(brief=brief, kind="title", count=8)
         )
+        selected_title = brief.selected_title or batch.recommended
         return StepResult(
-            output={"candidate_batch": _model(batch)},
-            state_updates={"selected_title": batch.recommended},
+            output={"candidate_batch": _model(batch), "selected_title": selected_title},
+            state_updates={"selected_title": selected_title},
         )
 
     async def _workflow_outline(self, context: StepContext) -> StepResult:
         brief = WritingBrief.model_validate(context.input["brief"])
-        recipe = get_recipe(brief.recipe_id, pack_id=brief.scenario_pack_id)
+        recipe = _effective_recipe(brief)
         outline = [
             {"id": section.id, "title": section.title, "purpose": section.purpose}
             for section in recipe.sections
@@ -1679,7 +1743,7 @@ class YanzhangPlatformService:
         brief = WritingBrief.model_validate(context.input["brief"])
         project_id = _workflow_project_id(context)
         materials = await self._materials(project_id, brief.knowledge_item_ids)
-        recipe = get_recipe(brief.recipe_id, pack_id=brief.scenario_pack_id)
+        recipe = _effective_recipe(brief)
         live = _workflow_boolean(context, "live", default=False)
         title_value = context.state.get("selected_title")
         title = title_value if isinstance(title_value, str) else brief.title
@@ -2079,6 +2143,30 @@ def _persist_provenance_graph(
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:24]
     return f"{prefix}-{digest}"
+
+
+def _effective_recipe(brief: WritingBrief) -> RecipeDefinition:
+    """Return the selected recipe with an explicitly saved section plan applied."""
+
+    recipe = get_recipe(brief.recipe_id, pack_id=brief.scenario_pack_id)
+    if not brief.structure_override:
+        return recipe
+    sections = tuple(
+        RecipeSection(
+            id=section.id,
+            title=section.title,
+            purpose=section.purpose,
+            required=section.required,
+        )
+        for section in brief.structure_override
+    )
+    return recipe.model_copy(update={"sections": sections})
+
+
+def _fact_materials(materials: Sequence[KnowledgeItem]) -> tuple[KnowledgeItem, ...]:
+    """Exclude writing-style references from the factual evidence boundary."""
+
+    return tuple(item for item in materials if item.kind != "style_reference")
 
 
 def _academic_models[ModelT: BaseModel](

@@ -79,9 +79,16 @@ from gongwen_mcp.writing_tools import (
     YanzhangToolError,
     YanzhangWritingTools,
 )
-from yanzhang_core.models import AssetStatus, Channel, ContentBlock, KnowledgeKind
+from yanzhang_core.models import (
+    AssetStatus,
+    Channel,
+    ContentBlock,
+    KnowledgeKind,
+    WritingStructureSection,
+)
 from yanzhang_core.packs import ScenarioPackId, list_recipes
 from yanzhang_core.parsers import DocumentParseError, parse_document
+from yanzhang_core.storage import BriefConflictError, ProjectScopeError
 
 _DEFAULT_MAX_REQUEST_BYTES: Final = 8 * 1024 * 1024
 _MAX_BASE64_CHARACTERS: Final = 16 * 1024 * 1024
@@ -120,6 +127,12 @@ class CreateBriefRequest(WritingRequest):
     """Persist one normalized writing brief inside a project."""
 
     project_id: str = Field(min_length=1, max_length=128)
+    brief_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        validation_alias=AliasChoices("brief_id", "id"),
+    )
     title: str = Field(
         min_length=1,
         max_length=300,
@@ -142,6 +155,11 @@ class CreateBriefRequest(WritingRequest):
         validation_alias=AliasChoices("material_ids", "knowledge_item_ids"),
     )
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    selected_title: str | None = Field(default=None, min_length=1, max_length=300)
+    structure_override: list[WritingStructureSection] = Field(
+        default_factory=list,
+        max_length=24,
+    )
 
     @field_validator("constraints", "keywords")
     @classmethod
@@ -162,6 +180,19 @@ class CreateBriefRequest(WritingRequest):
         if len(cleaned) != len(set(cleaned)):
             raise ValueError("material_ids 不得重复")
         return cleaned
+
+    @field_validator("structure_override")
+    @classmethod
+    def validate_structure_override(
+        cls, values: list[WritingStructureSection]
+    ) -> list[WritingStructureSection]:
+        ids = [value.id for value in values]
+        titles = [value.title for value in values]
+        if len(ids) != len(set(ids)):
+            raise ValueError("structure_override 的章节标识不得重复")
+        if len(titles) != len(set(titles)):
+            raise ValueError("structure_override 的章节标题不得重复")
+        return values
 
 
 class CreateAssetRequest(WritingRequest):
@@ -942,6 +973,10 @@ async def _invoke_platform_extension(
         raise YanzhangToolError("invalid_request", _validation_summary(exc)) from None
     except TimeoutError:
         raise YanzhangToolError("operation_timeout", "操作超时。请稍后重试") from None
+    except BriefConflictError:
+        raise YanzhangToolError("brief_conflict", "任务简报标识已绑定其他内容") from None
+    except ProjectScopeError:
+        raise YanzhangToolError("project_scope_error", "资源不属于当前项目") from None
     except (KeyError, LookupError):
         raise YanzhangToolError("not_found", "未找到指定资源") from None
     except ValueError:
@@ -1080,6 +1115,8 @@ def _exception_response(exc: Exception) -> JSONResponse:
     if isinstance(exc, YanzhangToolError):
         status_by_code = {
             "invalid_request": 422,
+            "brief_conflict": 409,
+            "project_scope_error": 409,
             "not_found": 404,
             "operation_timeout": 504,
             "invalid_result": 502,

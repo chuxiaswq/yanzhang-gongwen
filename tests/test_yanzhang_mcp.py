@@ -47,6 +47,7 @@ from gongwen_mcp.writing_server import (
     register_writing_tools,
 )
 from gongwen_mcp.writing_tools import PlatformResult, YanzhangPlatform
+from yanzhang_core.storage import BriefConflictError, ProjectScopeError
 
 
 class FakePlatform:
@@ -92,6 +93,7 @@ async def test_registers_complete_tool_group_with_closed_bounded_schemas() -> No
     title_defs = cast(dict[str, dict[str, object]], schemas["yanzhang_generate_titles"]["$defs"])
     assert title_defs["CandidateCount"]["minimum"] == 1
     assert title_defs["CandidateCount"]["maximum"] == 12
+    assert title_defs["Topic"]["maxLength"] == 300
     academic_title_defs = cast(
         dict[str, dict[str, object]],
         schemas["yanzhang_suggest_academic_titles"]["$defs"],
@@ -151,6 +153,23 @@ async def test_registers_complete_tool_group_with_closed_bounded_schemas() -> No
         "yanzhang_cancel_workflow",
     ):
         assert "project_id" in schemas[name]["required"]
+    assert "material_id" in schemas["yanzhang_add_material"]["properties"]
+    title_properties = schemas["yanzhang_generate_titles"]["properties"]
+    assert set(title_properties) == set(GenerateTitlesRequest.model_fields)
+    assert {"selected_title", "structure_override"}.issubset(title_properties)
+    workflow_properties = schemas["yanzhang_create_workflow"]["properties"]
+    assert {"brief_id", "selected_title", "structure_override"}.issubset(workflow_properties)
+    for name in ("yanzhang_generate_titles", "yanzhang_create_workflow"):
+        definitions = cast(dict[str, dict[str, object]], schemas[name]["$defs"])
+        structure = definitions["StructureOverride"]
+        assert structure["maxItems"] == 24
+        assert structure["items"] == {"$ref": "#/$defs/WritingStructureSection"}
+        section = definitions["WritingStructureSection"]
+        section_properties = cast(dict[str, dict[str, object]], section["properties"])
+        assert section["additionalProperties"] is False
+        assert section_properties["id"]["maxLength"] == 80
+        assert section_properties["title"]["maxLength"] == 100
+        assert section_properties["purpose"]["maxLength"] == 500
 
 
 @pytest.mark.asyncio
@@ -186,7 +205,12 @@ async def test_registers_complete_tool_group_with_closed_bounded_schemas() -> No
         ),
         (
             "yanzhang_add_material",
-            {"project_id": "project-1", "title": "会议记录", "content": "形成三项决定。"},
+            {
+                "project_id": "project-1",
+                "material_id": "workspace-source-stable",
+                "title": "会议记录",
+                "content": "形成三项决定。",
+            },
             AddMaterialRequest,
         ),
         (
@@ -204,6 +228,14 @@ async def test_registers_complete_tool_group_with_closed_bounded_schemas() -> No
                 "content_type": "工作总结",
                 "scenario_pack_id": "gongwen",
                 "recipe_id": "work-summary",
+                "selected_title": "稳中求进开新局",
+                "structure_override": [
+                    {
+                        "id": "focus",
+                        "title": "一、聚焦重点",
+                        "purpose": "明确表达焦点。",
+                    }
+                ],
                 "count": 3,
                 "formula_ids": ["parallel-triad"],
             },
@@ -219,6 +251,15 @@ async def test_registers_complete_tool_group_with_closed_bounded_schemas() -> No
                 "content_type": "工作总结",
                 "scenario_pack_id": "gongwen",
                 "recipe_id": "work-summary",
+                "brief_id": "brief-workbench",
+                "selected_title": "抓重点 破难点 开新局",
+                "structure_override": [
+                    {
+                        "id": "progress",
+                        "title": "一、主要进展",
+                        "purpose": "归纳事实进展。",
+                    }
+                ],
                 "requested_exports": ["docx"],
             },
             CreateWorkflowRequest,
@@ -342,6 +383,8 @@ async def test_tools_delegate_typed_requests(
     if name == "yanzhang_generate_titles":
         title_request = cast(GenerateTitlesRequest, platform.calls[-1][1])
         assert title_request.formula_ids == ["parallel-triad"]
+        assert title_request.selected_title == "稳中求进开新局"
+        assert title_request.structure_override[0].id == "focus"
 
 
 @pytest.mark.asyncio
@@ -399,6 +442,68 @@ async def test_backend_errors_and_invalid_results_are_stable_and_non_reflective(
     assert "SECRET-MATERIAL" not in str(backend_error.value)
 
 
+@pytest.mark.asyncio
+async def test_project_scope_errors_have_a_stable_public_boundary_code() -> None:
+    class ScopePlatform(FakePlatform):
+        async def yanzhang_add_material(
+            self,
+            request: AddMaterialRequest,
+        ) -> Mapping[str, object]:
+            raise ProjectScopeError(
+                f"knowledge item does not belong to project: {request.material_id}"
+            )
+
+    server = _server(ScopePlatform())
+
+    with pytest.raises(ToolError) as scope_error:
+        await server.call_tool(
+            "yanzhang_add_material",
+            {
+                "project_id": "project-2",
+                "material_id": "stable-private-material-id",
+                "title": "项目材料",
+                "content": "项目范围测试。",
+            },
+        )
+
+    assert "project_scope_error" in str(scope_error.value)
+    assert "stable-private-material-id" not in str(scope_error.value)
+
+
+@pytest.mark.asyncio
+async def test_brief_conflicts_have_a_stable_non_reflective_boundary_code() -> None:
+    class ConflictPlatform(FakePlatform):
+        async def yanzhang_create_workflow(
+            self,
+            request: CreateWorkflowRequest,
+        ) -> Mapping[str, object]:
+            raise BriefConflictError(
+                f"brief content conflicts with stored id: {request.brief_id}; "
+                "FIXTURE_PRIVATE_BRIEF_CONTENT"
+            )
+
+    server = _server(ConflictPlatform())
+
+    with pytest.raises(ToolError) as conflict_error:
+        await server.call_tool(
+            "yanzhang_create_workflow",
+            {
+                "project_id": "project-1",
+                "brief_id": "stable-private-brief-id",
+                "topic": "年度复盘",
+                "goal": "形成管理层汇报",
+                "audience": "管理层",
+                "content_type": "工作总结",
+                "scenario_pack_id": "gongwen",
+                "recipe_id": "work-summary",
+            },
+        )
+
+    assert "brief_conflict" in str(conflict_error.value)
+    assert "stable-private-brief-id" not in str(conflict_error.value)
+    assert "FIXTURE_PRIVATE_BRIEF_CONTENT" not in str(conflict_error.value)
+
+
 def test_request_models_reject_duplicates_and_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         GenerateTitlesRequest(
@@ -433,6 +538,17 @@ def test_request_models_reject_duplicates_and_unknown_fields() -> None:
             scenario_pack_id="gongwen",
             recipe_id="work-summary",
             count=13,
+        )
+
+    with pytest.raises(ValidationError):
+        GenerateTitlesRequest(
+            project_id="project-1",
+            topic="题" * 301,
+            goal="目标",
+            audience="读者",
+            content_type="工作总结",
+            scenario_pack_id="gongwen",
+            recipe_id="work-summary",
         )
 
     with pytest.raises(ValidationError):

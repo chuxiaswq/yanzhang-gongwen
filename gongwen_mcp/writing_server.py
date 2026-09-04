@@ -82,14 +82,14 @@ from yanzhang_academic.models import (
     ResearchClaim,
     ReviewComment,
 )
-from yanzhang_core.models import AssetStatus, Channel, KnowledgeKind
+from yanzhang_core.models import AssetStatus, Channel, KnowledgeKind, WritingStructureSection
 from yanzhang_core.packs import HeadlineKind, ScenarioPackId
 
 type ProjectId = Annotated[str, Field(min_length=1, max_length=128)]
 type ResourceId = Annotated[str, Field(min_length=1, max_length=200)]
 type ShortId = Annotated[str, Field(min_length=1, max_length=128)]
 type ProjectName = Annotated[str, Field(min_length=1, max_length=200)]
-type Topic = Annotated[str, Field(min_length=1, max_length=500)]
+type Topic = Annotated[str, Field(min_length=1, max_length=300)]
 type Goal = Annotated[str, Field(min_length=1, max_length=2_000)]
 type Audience = Annotated[str, Field(min_length=1, max_length=500)]
 type Query = Annotated[str, Field(min_length=1, max_length=2_000)]
@@ -110,6 +110,7 @@ type RecordIds = Annotated[list[str], Field(min_length=1, max_length=1_000)]
 type EvidenceIds = Annotated[list[str], Field(min_length=1, max_length=1_000)]
 type Claims = Annotated[list[ResearchClaim], Field(min_length=1, max_length=500)]
 type ReviewComments = Annotated[list[ReviewComment], Field(min_length=1, max_length=200)]
+type StructureOverride = Annotated[list[WritingStructureSection], Field(max_length=24)]
 
 YANZHANG_TOOL_NAMES: tuple[str, ...] = (
     "yanzhang_get_status",
@@ -392,6 +393,7 @@ def register_writing_tools(
         kind: KnowledgeKind = "source",
         source_url: str = "",
         tags: list[str] | None = None,
+        material_id: ShortId | None = None,
     ) -> dict[str, object]:
         return await tools.yanzhang_add_material(
             _request(
@@ -402,6 +404,7 @@ def register_writing_tools(
                 kind=kind,
                 source_url=source_url,
                 tags=tags or [],
+                material_id=material_id,
             )
         )
 
@@ -480,7 +483,10 @@ def register_writing_tools(
     @server.tool(
         name="yanzhang_generate_titles",
         title="生成多场景标题候选",
-        description="基于场景配方、项目资料和标题类型生成可比较的标题候选。",
+        description=(
+            "基于任务简报与场景公式生成可比较候选；已采用标题和自定义结构为非标题表达"
+            "提供上下文，明确关联的事实资料只参与保守的焦点兜底与事实评分。"
+        ),
         annotations=mutate_network,
     )
     async def yanzhang_generate_titles(
@@ -499,6 +505,8 @@ def register_writing_tools(
         keywords: list[str] | None = None,
         material_ids: list[str] | None = None,
         model_profile_id: str | None = None,
+        selected_title: Annotated[str, Field(min_length=1, max_length=300)] | None = None,
+        structure_override: StructureOverride | None = None,
         count: CandidateCount = 8,
         headline_kind: HeadlineKind = "title",
         formula_ids: list[str] | None = None,
@@ -521,6 +529,8 @@ def register_writing_tools(
                 keywords=keywords or [],
                 material_ids=material_ids or [],
                 model_profile_id=model_profile_id,
+                selected_title=selected_title,
+                structure_override=structure_override or [],
                 count=count,
                 headline_kind=headline_kind,
                 formula_ids=formula_ids or [],
@@ -549,6 +559,9 @@ def register_writing_tools(
         keywords: list[str] | None = None,
         material_ids: list[str] | None = None,
         model_profile_id: str | None = None,
+        brief_id: ShortId | None = None,
+        selected_title: Annotated[str, Field(min_length=1, max_length=300)] | None = None,
+        structure_override: StructureOverride | None = None,
         auto_review: bool = True,
         requested_exports: list[AssetExportFormat] | None = None,
     ) -> dict[str, object]:
@@ -570,6 +583,9 @@ def register_writing_tools(
                 keywords=keywords or [],
                 material_ids=material_ids or [],
                 model_profile_id=model_profile_id,
+                brief_id=brief_id,
+                selected_title=selected_title,
+                structure_override=structure_override or [],
                 auto_review=auto_review,
                 requested_exports=requested_exports or [],
             )

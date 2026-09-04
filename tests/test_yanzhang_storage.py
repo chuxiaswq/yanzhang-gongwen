@@ -142,6 +142,40 @@ def test_writing_schema_v1_migrates_project_tags_without_data_loss(tmp_path: Pat
         ).fetchone() == ("3",)
 
 
+def test_knowledge_upsert_returns_the_persisted_creation_timestamp(tmp_path: Path) -> None:
+    storage = WritingStorage(tmp_path / "writing.sqlite3")
+    project = storage.create_project("资料同步", project_id="project-material-sync")
+    repository = KnowledgeRepository(storage)
+    original_created_at = datetime(2025, 1, 2, 3, 4, tzinfo=UTC)
+    replacement_created_at = datetime(2030, 6, 7, 8, 9, tzinfo=UTC)
+
+    first = repository.upsert_item(
+        KnowledgeItem(
+            id="stable-material",
+            project_id=project.id,
+            title="第一版",
+            content="第一版内容。",
+            created_at=original_created_at,
+        )
+    )
+    updated = repository.upsert_item(
+        KnowledgeItem(
+            id="stable-material",
+            project_id=project.id,
+            title="第二版",
+            content="第二版内容。",
+            created_at=replacement_created_at,
+        )
+    )
+    persisted = repository.get_item("stable-material", project_id=project.id)
+
+    assert first.created_at == original_created_at
+    assert updated == persisted
+    assert updated.created_at == original_created_at
+    assert updated.title == "第二版"
+    assert updated.content == "第二版内容。"
+
+
 def test_knowledge_fts_evidence_claim_citation_terms_and_audit(tmp_path: Path) -> None:
     storage = WritingStorage(tmp_path / "writing.sqlite3")
     project = storage.create_project("知识库", project_id="project-1")

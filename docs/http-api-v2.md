@@ -45,9 +45,9 @@
 ```
 
 `details` 仅在存在结构化字段信息时出现，最多返回 20 项，且不回显密钥、完整请求或上游正文。
-常见状态为 `400 invalid_json`、`409 identity_mismatch`、`413 request_too_large`、
-`415 unsupported_media_type`、`422 validation_error`、`404 not_found`、`504 operation_timeout` 和
-`500 internal_error`。
+常见状态为 `400 invalid_json`、`409 identity_mismatch`、`409 brief_conflict`、
+`409 project_scope_error`、`413 request_too_large`、`415 unsupported_media_type`、
+`422 validation_error`、`404 not_found`、`504 operation_timeout` 和 `500 internal_error`。
 
 ## 2. 正式路由目录
 
@@ -66,7 +66,7 @@
 | `GET` | `/api/v2/projects/{project_id}/terms` | 分页列出项目术语规则 |
 | `DELETE` | `/api/v2/projects/{project_id}/terms/{term_id}` | 删除一条项目术语规则 |
 | `POST` | `/api/v2/projects/{project_id}/briefs` | 保存规范化任务简报 |
-| `POST` | `/api/v2/projects/{project_id}/materials` | 添加一项项目资料 |
+| `POST` | `/api/v2/projects/{project_id}/materials` | 新增项目资料，或按可选 `material_id` 幂等更新 |
 | `GET` | `/api/v2/projects/{project_id}/materials` | 按类型、标签分页列出资料 |
 | `GET` | `/api/v2/projects/{project_id}/materials/{material_id}` | 分块读取资料 |
 | `POST` | `/api/v2/projects/{project_id}/materials/import` | 从 Base64 文档解析并保存资料 |
@@ -119,7 +119,7 @@
 
 ## 3. 状态、场景包与工作流定义
 
-`GET /api/v2/bootstrap` 无业务参数，返回存储就绪状态、模型路由、4 个场景包/17 个配方的数量、
+`GET /api/v2/bootstrap` 无业务参数，返回存储就绪状态、模型路由、4 个场景包/19 个配方的数量、
 导入导出格式以及可用学术连接器。敏感配置只表达能力是否就绪。
 
 ```text
@@ -131,6 +131,8 @@ GET /api/v2/workflow-definitions?scenario_pack_id=gongwen&limit=20&offset=0
 `pack_id` 为 `gongwen`、`workplace`、`media` 或 `academic`。渠道为 `document`、`email`、
 `meeting`、`presentation`、`web`、`social` 或 `academic`。工作流定义返回配方 ID、名称、说明、
 场景包、文种、渠道、步骤和输出格式，可直接用于前端配方选择器。
+`gongwen` 包含 `work-summary`、`briefing-material`、`leadership-speech`（领导讲话）、
+`research-report`（调研报告）、`implementation-plan` 和 `meeting-minutes`。
 
 ## 4. 项目、任务简报与资料
 
@@ -177,7 +179,9 @@ GET /api/v2/projects/PROJECT_ID
 
 ```json
 {
+  "brief_id": "STABLE_BRIEF_ID",
   "title": "第三季度经营复盘",
+  "selected_title": "聚焦关键任务 推动第三季度经营提质增效",
   "goal": "形成面向管理层的结论与下一步行动",
   "audience": "经营管理层",
   "channel": "document",
@@ -190,12 +194,34 @@ GET /api/v2/projects/PROJECT_ID
   "constraints": ["标题采用三段同构排比"],
   "keywords": ["增长", "问题", "行动"],
   "material_ids": ["MATERIAL_ID"],
+  "structure_override": [
+    {
+      "id": "progress",
+      "title": "一、主要进展",
+      "purpose": "用已核对的事实和数据概括阶段性成效",
+      "required": true
+    },
+    {
+      "id": "actions",
+      "title": "二、下一步安排",
+      "purpose": "明确责任、任务和时限",
+      "required": true
+    }
+  ],
   "model_profile_id": null
 }
 ```
 
 `title` 也接受 `topic` 作为输入别名；`material_ids` 也接受 `knowledge_item_ids`。保存前会校验
-场景包、配方、渠道及资料均属于该项目。响应中的 `brief.id` 用于后续生成母稿。
+场景包、配方、渠道及资料均属于该项目。`brief_id`（也接受 `id`）可选、为 1–128 字符，
+用于由调用方绑定稳定简报 ID。`selected_title` 可选、为 1–300 字符；`structure_override` 最多 24 节，
+每节的 `id`（1–80）和 `title`（1–100）在列表内各自唯一，`purpose` 为 1–500 字符，
+`required` 默认为 `true`。非空自定义结构按输入顺序替代配方默认章节。响应同时返回
+`brief.id` 和顶层 `brief_id`，后续工作流与母稿使用该 ID。
+
+`brief_id` 是项目绑定且内容不可变的任务标识：同一项目用完全相同的规范化简报重放会幂等返回
+原记录；同一项目用该 ID 提交不同内容返回 `409 brief_conflict`；在其他项目重用该 ID 返回
+`409 project_scope_error`。冲突响应只给出稳定错误类别和固定提示，不回显简报 ID、正文或底层异常。
 
 ### 添加、导入与读取资料
 
@@ -203,6 +229,7 @@ GET /api/v2/projects/PROJECT_ID
 
 ```json
 {
+  "material_id": "stable-source-2026-q3",
   "title": "第三季度经营数据",
   "content": "经核对的正文或数据说明",
   "kind": "source",
@@ -212,7 +239,9 @@ GET /api/v2/projects/PROJECT_ID
 ```
 
 `kind` 为 `source`、`style_reference`、`prior_asset`、`terminology` 或 `note`；内容最多
-500000 字符，URL 最多 2000 字符，标签最多 64 项。
+500000 字符，URL 最多 2000 字符，标签最多 64 项。可选 `material_id` 为 1–128 字符；
+在同一项目内重复使用同一 ID 会幂等更新该资料，可用于重试和外部资料同步。将选中文章保存为
+`style_reference` 时，它只参与结构、标题节奏、语气和句式参考，不进入正文事实或证据链。
 
 文件导入接受 TXT、Markdown、HTML、DOCX 与 PDF：
 
@@ -244,7 +273,8 @@ GET /api/v2/projects/PROJECT_ID/search?query=经营成效&scope=all&limit=20&off
 
 ## 5. 标题与开头
 
-`POST /api/v2/projects/PROJECT_ID/headlines` 使用与工作流相同的任务简报字段，但主题字段名为
+`POST /api/v2/projects/PROJECT_ID/headlines` 使用任务简报公共字段（不含工作流专有的 `brief_id`），
+包括可选的 `selected_title` 与 `structure_override`；主题字段名为
 `topic`，并增加 `count`、`headline_kind` 与 `formula_ids`：
 
 ```json
@@ -269,7 +299,12 @@ GET /api/v2/projects/PROJECT_ID/search?query=经营成效&scope=all&limit=20&off
 ```
 
 `headline_kind` 为 `title`、`opening`、`section_heading` 或 `topic_sentence`；`count` 1–12。
-响应返回候选、评分与方法说明，不创建文字资产。
+响应返回候选、评分、方法说明与 `context_usage`，不创建文字资产。对开头、小标题和段首句，
+`selected_title` 成为当前母稿主题；表达焦点依次使用 `keywords` 首项、`structure_override`
+首节标题、已采用标题、首项事实资料标题和任务主题。明确关联且类型不是
+`style_reference` 的资料最多取前 16 项、每项前 4000 字，仅用于焦点兜底和事实克制评分；本地
+确定性引擎不从资料正文抽取新表述。`context_usage.factual_material_ids` 列出实际进入该边界的资料，
+`excluded_style_reference_count` 给出排除数量。
 
 ### 可解释表达公式目录
 
@@ -296,14 +331,21 @@ ID 或与 `headline_kind` 不匹配的 ID 返回字段校验错误。候选同�
 
 ```json
 {
+  "brief_id": "STABLE_BRIEF_ID",
   "auto_review": true,
   "requested_exports": ["docx", "markdown"]
 }
 ```
 
 完整请求中仍需包含 `topic`、`goal`、`audience`、`content_type`、`scenario_pack_id` 与
-`recipe_id`。`requested_exports` 最多 7 个唯一值，可选 `docx`、`markdown`、`text`、`html`、
-`pdf`、`latex`、`csv`。创建响应返回工作流状态与步骤计划。
+`recipe_id`，也可携带公共字段 `selected_title` 和 `structure_override`。`brief_id` 可选：省略时
+服务保存一份新简报；传入时复用该项目内的已保存简报，且完整简报字段必须与已保存内容
+一致，避免将已绑定资产的简报静默改写。`requested_exports` 最多 7 个唯一值，可选 `docx`、
+`markdown`、`text`、`html`、`pdf`、`latex`、`csv`。创建响应返回工作流状态、步骤计划和
+顶层 `brief_id`；`workflow.brief_id` 也表达同一绑定关系。客户端应保存该 ID，将后续母稿、版本与
+审校结果绑定到同一任务简报。
+运行、查询、取消或恢复响应中的 `workflow.brief_id` 始终与创建时一致；只有创建响应另外
+提供顶层 `brief_id`。
 
 ### 运行、恢复和取消
 
@@ -340,13 +382,14 @@ POST /api/v2/projects/PROJECT_ID/workflows/WORKFLOW_ID/cancel
 ```json
 {
   "brief_id": "BRIEF_ID",
-  "title": "第三季度经营复盘",
   "live": false
 }
 ```
 
 `brief_id` 必须属于当前项目。`live=false` 使用确定性本地组合器；`live=true` 由服务端模型画像与
-路由决定。创建成功后同时写入母稿和第一个不可变版本。
+路由决定。母稿标题优先级为：创建请求显式 `title` > `brief.selected_title` > `brief.title`。
+已保存的非空 `structure_override` 按其顺序整体替代配方默认章节。创建成功后同时写入母稿和
+第一个不可变版本。
 
 ### 列表与分块读取
 
@@ -554,7 +597,9 @@ v0.2 页面保留下列扁平路径，便于渐进升级。新集成优先使用
 
 - GET 状态、目录、列表、读取和搜索可按相同参数重试。
 - POST 创建项目、资料、简报、工作流、资产、版本、变体、导出和学术记录具有持久化副作用；
-  请求超时后先查询相应资源。
+  请求超时后先查询相应资源。添加资料时传稳定 `material_id` 可对同一同步操作安全重放；
+  跨项目重用已存 ID 返回 `409 project_scope_error`。保存简报时，同项目的相同规范化内容可按
+  稳定 `brief_id` 安全重放；内容变化须使用新的 ID，否则返回 `409 brief_conflict`。
 - 母稿与变体分别维护版本。编辑保存时携带最新 `expected_revision`，以便识别并发冲突。
 - 真实模型、文章来源与学术元数据请求在 SQLite 事务外执行，结果通过短事务写入。
 - v0.1 `/api/*` 继续服务原公文页面与自动化，包括健康/就绪、方法论、拟题、生成、改写、审校、

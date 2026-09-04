@@ -258,6 +258,7 @@ def _deterministic_blocks(
     title: str,
 ) -> tuple[ContentBlock, ...]:
     blocks: list[ContentBlock] = []
+    fact_knowledge = tuple(item for item in knowledge if item.kind != "style_reference")
     for section_index, section in enumerate(recipe.sections):
         heading_order = len(blocks)
         blocks.append(
@@ -269,7 +270,7 @@ def _deterministic_blocks(
                 heading_level=1,
             )
         )
-        reference = knowledge[section_index % len(knowledge)] if knowledge else None
+        reference = fact_knowledge[section_index % len(fact_knowledge)] if fact_knowledge else None
         paragraph = _deterministic_paragraph(
             brief,
             section_title=section.title,
@@ -300,7 +301,7 @@ def _deterministic_paragraph(
     prefix = (
         f"围绕“{brief.title}”，面向{brief.audience}，重点实现{_sentence(brief.goal)}"
         if first
-        else f"围绕“{section_title}”，{_sentence(section_purpose)}"
+        else f"围绕{section_title}，{_sentence(section_purpose)}"
     )
     if reference is None:
         evidence = "具体事实、数据、时间和责任主体请按【待补充】标记补齐。"
@@ -309,7 +310,13 @@ def _deterministic_paragraph(
         evidence = f"参考《{reference.title}》所载材料：{excerpt}"
     constraints = ""
     if brief.constraints:
-        constraints = " 写作时同时遵循：" + "；".join(brief.constraints) + "。"
+        clauses = tuple(
+            clause
+            for value in brief.constraints
+            if (clause := _normalize_text(value).rstrip("。！？；;，,. "))
+        )
+        if clauses:
+            constraints = " 写作时同时遵循：" + "；".join(clauses) + "。"
     return _normalize_text(prefix + evidence + constraints)
 
 
@@ -327,7 +334,7 @@ def _blocks_from_live_draft(
     returned_ids = tuple(section.id for section in payload.sections)
     if returned_ids != expected_ids:
         raise ModelCompositionOutputError("模型结果未按写作配方返回完整有序章节")
-    knowledge_ids = tuple(item.id for item in knowledge)
+    knowledge_ids = tuple(item.id for item in knowledge if item.kind != "style_reference")
     blocks: list[ContentBlock] = []
     for definition, section in zip(recipe.sections, payload.sections, strict=True):
         blocks.append(
@@ -426,8 +433,11 @@ def _composition_prompts(
         "你是砚章写作引擎。仅输出一个JSON对象，不得输出Markdown。"
         "对象必须且只能包含title和sections；sections每项必须且只能包含id和content。"
         "严格使用给定章节id及顺序，标题保持不变。事实、数字、日期、名称和引文只能来自"
-        "给定知识材料；依据不足时使用【待补充】。"
+        "给定事实材料；依据不足时使用【待补充】。写法参考只用于结构、语气和句式特征，"
+        "不得把其中事实写入成稿。"
     )
+    fact_knowledge = tuple(item for item in knowledge if item.kind != "style_reference")
+    style_references = tuple(item for item in knowledge if item.kind == "style_reference")
     request = {
         "brief": brief.model_dump(mode="json"),
         "title": title,
@@ -446,7 +456,15 @@ def _composition_prompts(
                 "kind": item.kind,
                 "content": item.content,
             }
-            for item in knowledge
+            for item in fact_knowledge
+        ],
+        "style_references": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "content": item.content,
+            }
+            for item in style_references
         ],
     }
     return system_prompt, json.dumps(request, ensure_ascii=False, separators=(",", ":"))
