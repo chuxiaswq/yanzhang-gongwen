@@ -1,4 +1,4 @@
-"""Bounded, persistent storage for MCP-generated document exports.
+"""Bounded, persistent storage for MCP-generated writing exports.
 
 Artifact payloads are written through :class:`storage.LocalStorage`, whose
 temporary-file-and-replace implementation keeps readers from observing a
@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal, Self
+from urllib.parse import quote
 
 try:
     import fcntl
@@ -35,29 +36,59 @@ from yanzhang.storage import LocalStorage, ObjectNotFoundError, StorageBackend, 
 
 DOCX_MIME: Final = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ZIP_MIME: Final = "application/zip"
+PDF_MIME: Final = "application/pdf"
+MARKDOWN_MIME: Final = "text/markdown; charset=utf-8"
+TEXT_MIME: Final = "text/plain; charset=utf-8"
+HTML_MIME: Final = "text/html; charset=utf-8"
+LATEX_MIME: Final = "application/x-latex"
+CSV_MIME: Final = "text/csv; charset=utf-8"
 ArtifactMime = Literal[
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/zip",
+    "application/pdf",
+    "text/markdown; charset=utf-8",
+    "text/plain; charset=utf-8",
+    "text/html; charset=utf-8",
+    "application/x-latex",
+    "text/csv; charset=utf-8",
 ]
 
 MAX_DOCX_BYTES: Final = 16 * 1024 * 1024
 MAX_ZIP_BYTES: Final = 64 * 1024 * 1024
+MAX_PDF_BYTES: Final = 32 * 1024 * 1024
+MAX_MARKDOWN_BYTES: Final = 8 * 1024 * 1024
+MAX_TEXT_BYTES: Final = 8 * 1024 * 1024
+MAX_HTML_BYTES: Final = 16 * 1024 * 1024
+MAX_LATEX_BYTES: Final = 8 * 1024 * 1024
+MAX_CSV_BYTES: Final = 16 * 1024 * 1024
 DEFAULT_TTL_SECONDS: Final = 24 * 60 * 60
 DEFAULT_MAX_TOTAL_BYTES: Final = 2 * 1024 * 1024 * 1024
 STALE_TEMP_GRACE_SECONDS: Final = 60 * 60
 
 _ARTIFACT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _METADATA_KEY = re.compile(r"(?P<artifact_id>[0-9a-f]{32})\.json\Z")
-_PAYLOAD_KEY = re.compile(r"(?P<artifact_id>[0-9a-f]{32})\.(?:docx|zip)\Z")
+_PAYLOAD_KEY = re.compile(r"(?P<artifact_id>[0-9a-f]{32})\.(?:docx|zip|pdf|md|txt|html|tex|csv)\Z")
 _LOCK_FILENAME: Final = ".gongwen-artifacts.lock"
 _TEMP_PREFIX: Final = ".yanzhang-tmp-"
 _EXTENSION_BY_MIME: Final[dict[str, str]] = {
     DOCX_MIME: ".docx",
     ZIP_MIME: ".zip",
+    PDF_MIME: ".pdf",
+    MARKDOWN_MIME: ".md",
+    TEXT_MIME: ".txt",
+    HTML_MIME: ".html",
+    LATEX_MIME: ".tex",
+    CSV_MIME: ".csv",
 }
 _LIMIT_BY_MIME: Final[dict[str, int]] = {
     DOCX_MIME: MAX_DOCX_BYTES,
     ZIP_MIME: MAX_ZIP_BYTES,
+    PDF_MIME: MAX_PDF_BYTES,
+    MARKDOWN_MIME: MAX_MARKDOWN_BYTES,
+    TEXT_MIME: MAX_TEXT_BYTES,
+    HTML_MIME: MAX_HTML_BYTES,
+    LATEX_MIME: MAX_LATEX_BYTES,
+    CSV_MIME: MAX_CSV_BYTES,
 }
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
@@ -91,7 +122,7 @@ class ArtifactCorrupt(ArtifactError):
 class ArtifactMetadata(BaseModel):
     """Public, path-free metadata for one generated export."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
     artifact_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     filename: str = Field(min_length=1, max_length=90)
@@ -99,12 +130,25 @@ class ArtifactMetadata(BaseModel):
     size: int = Field(ge=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     resource_uri: str
+    project_id: str | None = Field(default=None, min_length=1, max_length=128)
+    asset_id: str | None = Field(default=None, min_length=1, max_length=128)
+    revision_id: str | None = Field(default=None, min_length=1, max_length=128)
+    creator: str = Field(default="gongwen_v1", min_length=1, max_length=128)
     created_at: datetime
     expires_at: datetime
 
     @model_validator(mode="after")
     def _validate_identity_and_lifetime(self) -> Self:
-        expected_uri = artifact_resource_uri(self.artifact_id)
+        scope = (self.project_id, self.asset_id, self.revision_id)
+        if any(value is not None for value in scope) and not all(
+            value is not None for value in scope
+        ):
+            raise ValueError("scoped artifact metadata requires project, asset and revision ids")
+        expected_uri = (
+            project_artifact_resource_uri(self.project_id, self.artifact_id)
+            if self.project_id is not None
+            else artifact_resource_uri(self.artifact_id)
+        )
         if self.resource_uri != expected_uri:
             raise ValueError("artifact resource URI does not match its id")
         if self.created_at.tzinfo is None or self.expires_at.tzinfo is None:
@@ -145,8 +189,16 @@ def artifact_resource_uri(artifact_id: str) -> str:
     return f"gongwen://exports/{validated}"
 
 
+def project_artifact_resource_uri(project_id: str, artifact_id: str) -> str:
+    """Build the project-scoped resource URI used by v2 exports."""
+
+    project = _validate_scope_id(project_id, "project id")
+    artifact = _validate_artifact_id(artifact_id)
+    return f"yanzhang://projects/{quote(project, safe='')}/exports/{artifact}"
+
+
 class ArtifactStore:
-    """Persistent, size-bounded repository for DOCX and ZIP export bytes.
+    """Persistent, size-bounded repository for supported writing-export bytes.
 
     ``data_dir`` is the application's persistent data directory; objects are
     always kept in its ``exports`` child.  Supplying ``storage`` is intended for
@@ -191,6 +243,10 @@ class ArtifactStore:
         filename: str,
         mime: str,
         ttl_seconds: int | None = None,
+        project_id: str | None = None,
+        asset_id: str | None = None,
+        revision_id: str | None = None,
+        creator: str = "gongwen_v1",
     ) -> ArtifactMetadata:
         """Atomically persist an export and return public metadata for it."""
 
@@ -223,7 +279,15 @@ class ArtifactStore:
                 mime=normalized_mime,
                 size=len(payload),
                 sha256=hashlib.sha256(payload).hexdigest(),
-                resource_uri=artifact_resource_uri(artifact_id),
+                resource_uri=(
+                    project_artifact_resource_uri(project_id, artifact_id)
+                    if project_id is not None
+                    else artifact_resource_uri(artifact_id)
+                ),
+                project_id=project_id,
+                asset_id=asset_id,
+                revision_id=revision_id,
+                creator=creator,
                 created_at=now,
                 expires_at=now + timedelta(seconds=lifetime),
             )
@@ -253,26 +317,54 @@ class ArtifactStore:
         filename: str,
         mime: str,
         ttl_seconds: int | None = None,
+        project_id: str | None = None,
+        asset_id: str | None = None,
+        revision_id: str | None = None,
+        creator: str = "gongwen_v1",
     ) -> ArtifactMetadata:
         """Compatibility spelling for :meth:`put`."""
 
-        return self.put(data, filename=filename, mime=mime, ttl_seconds=ttl_seconds)
+        return self.put(
+            data,
+            filename=filename,
+            mime=mime,
+            ttl_seconds=ttl_seconds,
+            project_id=project_id,
+            asset_id=asset_id,
+            revision_id=revision_id,
+            creator=creator,
+        )
 
-    def get_metadata(self, artifact_id: str) -> ArtifactMetadata:
+    def get_metadata(
+        self,
+        artifact_id: str,
+        *,
+        project_id: str | None = None,
+        legacy_only: bool = False,
+    ) -> ArtifactMetadata:
         """Return persisted public metadata for an unexpired artifact."""
 
         validated = _validate_artifact_id(artifact_id)
         with self._repository_lock():
             self._cleanup_unlocked(now=self._now())
-            return self._load_metadata(validated)
+            metadata = self._load_metadata(validated)
+            _validate_requested_scope(metadata, project_id=project_id, legacy_only=legacy_only)
+            return metadata
 
-    def read_bytes(self, artifact_id: str) -> bytes:
+    def read_bytes(
+        self,
+        artifact_id: str,
+        *,
+        project_id: str | None = None,
+        legacy_only: bool = False,
+    ) -> bytes:
         """Read and integrity-check a committed artifact by opaque id."""
 
         validated = _validate_artifact_id(artifact_id)
         with self._repository_lock():
             self._cleanup_unlocked(now=self._now())
             metadata = self._load_metadata(validated)
+            _validate_requested_scope(metadata, project_id=project_id, legacy_only=legacy_only)
             payload_key = self._payload_key(validated, metadata.mime)
             try:
                 payload = self._storage.read_bytes(payload_key)
@@ -285,10 +377,16 @@ class ArtifactStore:
                 raise ArtifactCorrupt(f"artifact digest does not match metadata: {validated}")
             return payload
 
-    def read(self, artifact_id: str) -> bytes:
+    def read(
+        self,
+        artifact_id: str,
+        *,
+        project_id: str | None = None,
+        legacy_only: bool = False,
+    ) -> bytes:
         """Concise compatibility spelling for :meth:`read_bytes`."""
 
-        return self.read_bytes(artifact_id)
+        return self.read_bytes(artifact_id, project_id=project_id, legacy_only=legacy_only)
 
     def delete(self, artifact_id: str, *, missing_ok: bool = True) -> bool:
         """Delete one artifact without accepting a path-like identifier."""
@@ -559,12 +657,47 @@ def _validate_artifact_id(artifact_id: str) -> str:
     return artifact_id
 
 
+def _validate_scope_id(value: str, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    normalized = value.strip()
+    if not 1 <= len(normalized) <= 128:
+        raise ValueError(f"{name} must contain between 1 and 128 characters")
+    return normalized
+
+
+def _validate_requested_scope(
+    metadata: ArtifactMetadata,
+    *,
+    project_id: str | None,
+    legacy_only: bool,
+) -> None:
+    if project_id is not None and legacy_only:
+        raise ValueError("project_id and legacy_only are mutually exclusive")
+    if project_id is not None:
+        expected = _validate_scope_id(project_id, "project id")
+        if metadata.project_id != expected:
+            # Keep a cross-project identifier indistinguishable from a missing one.
+            raise ArtifactNotFound(metadata.artifact_id)
+    elif legacy_only and metadata.project_id is not None:
+        raise ArtifactNotFound(metadata.artifact_id)
+
+
 def _normalize_mime(mime: str) -> ArtifactMime:
     normalized = mime.strip().casefold()
-    if normalized == DOCX_MIME:
-        return DOCX_MIME
-    if normalized == ZIP_MIME:
-        return ZIP_MIME
+    canonical: dict[str, ArtifactMime] = {
+        DOCX_MIME: DOCX_MIME,
+        ZIP_MIME: ZIP_MIME,
+        PDF_MIME: PDF_MIME,
+        MARKDOWN_MIME: MARKDOWN_MIME,
+        TEXT_MIME: TEXT_MIME,
+        HTML_MIME: HTML_MIME,
+        LATEX_MIME: LATEX_MIME,
+        CSV_MIME: CSV_MIME,
+    }
+    supported = canonical.get(normalized)
+    if supported is not None:
+        return supported
     raise UnsupportedArtifactType(f"unsupported artifact MIME type: {mime!r}")
 
 
@@ -586,12 +719,24 @@ def _utc_now() -> datetime:
 
 
 __all__ = [
+    "CSV_MIME",
     "DEFAULT_MAX_TOTAL_BYTES",
     "DEFAULT_TTL_SECONDS",
     "DOCX_MIME",
+    "HTML_MIME",
+    "LATEX_MIME",
+    "MARKDOWN_MIME",
+    "MAX_CSV_BYTES",
     "MAX_DOCX_BYTES",
+    "MAX_HTML_BYTES",
+    "MAX_LATEX_BYTES",
+    "MAX_MARKDOWN_BYTES",
+    "MAX_PDF_BYTES",
+    "MAX_TEXT_BYTES",
     "MAX_ZIP_BYTES",
+    "PDF_MIME",
     "STALE_TEMP_GRACE_SECONDS",
+    "TEXT_MIME",
     "ZIP_MIME",
     "ArtifactCorrupt",
     "ArtifactError",
@@ -603,4 +748,5 @@ __all__ = [
     "InvalidArtifactId",
     "UnsupportedArtifactType",
     "artifact_resource_uri",
+    "project_artifact_resource_uri",
 ]

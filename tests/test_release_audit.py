@@ -115,6 +115,17 @@ def test_unknown_file_types_fail_closed() -> None:
     assert audit._content_errors("opaque.blob", b"private") == ["unreviewed file type: opaque.blob"]
 
 
+def test_commonjs_test_sources_are_audited_as_text() -> None:
+    audit = _load_release_audit()
+
+    assert audit._content_errors("tests/js/contract.test.cjs", b"const fixture = true;\n") == []
+    private_value = "sk" + "-" + "A" * 24
+    assert audit._content_errors(
+        "tests/js/contract.test.cjs",
+        f'const token = "{private_value}";\n'.encode(),
+    ) == ["model-key signature: tests/js/contract.test.cjs"]
+
+
 def test_source_audit_rejects_local_virtualenv_and_cache_trees(tmp_path: Path) -> None:
     audit = _load_release_audit()
     for required in ("README.md", "SECURITY.md", "PRIVACY.md", "LICENSE", "pyproject.toml"):

@@ -286,7 +286,7 @@ def _parser() -> argparse.ArgumentParser:
         "--database",
         type=Path,
         default=default_database_path(),
-        help="数据库文件路径（默认读取 GONGWEN_DATA_DIR）",
+        help="数据库文件路径（默认读取 YANZHANG_DATA_DIR，兼容 GONGWEN_DATA_DIR）",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="检查数据库完整性并显示数据量")

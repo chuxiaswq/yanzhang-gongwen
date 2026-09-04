@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -165,6 +166,30 @@ def test_runtime_settings_parse_production_environment_without_exposing_secrets(
         RuntimeSettings.from_env({"GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH": "1"})
 
 
+def test_opt_in_access_log_omits_query_and_client_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def probe(_request: Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    app = Starlette(
+        routes=[Route("/probe", probe)],
+        middleware=runtime_middleware(RuntimeSettings(access_log=True)),
+    )
+    with caplog.at_level(logging.INFO, logger="yanzhang.access"):
+        with TestClient(app) as client:
+            response = client.get("/probe?term=PRIVATE_QUERY_FIXTURE")
+
+    assert response.status_code == 200
+    messages = [
+        record.getMessage() for record in caplog.records if record.name == "yanzhang.access"
+    ]
+    assert messages
+    assert any("GET /probe 200" in message for message in messages)
+    assert all("PRIVATE_QUERY_FIXTURE" not in message for message in messages)
+    assert all("testclient" not in message for message in messages)
+
+
 def test_server_provider_aliases_are_normalized_and_unknown_names_fail_fast() -> None:
     settings = RuntimeSettings.from_env(
         {
@@ -184,6 +209,61 @@ def test_server_provider_aliases_are_normalized_and_unknown_names_fail_fast() ->
                 "GONGWEN_LLM_API_KEY": "fixture-secret",
             }
         )
+
+
+def test_production_server_provider_requires_tls_or_explicit_loopback_opt_in() -> None:
+    base = {
+        "GONGWEN_ENV": "production",
+        "GONGWEN_HOST": "0.0.0.0",
+        "GONGWEN_ALLOWED_HOSTS": "docs.example.test",
+        "GONGWEN_ACCESS_TOKEN": "fixture-web-token-with-at-least-32-bytes",
+        "GONGWEN_MCP_ACCESS_TOKEN": "fixture-mcp-token-with-at-least-32-bytes",
+        "GONGWEN_LLM_PROVIDER": "openai",
+        "GONGWEN_LLM_MODEL": "fixture-model",
+        "GONGWEN_LLM_API_KEY": "FIXTURE_PROVIDER_CREDENTIAL",
+    }
+
+    with pytest.raises(ValueError, match=r"GONGWEN_LLM_BASE_URL.*HTTPS"):
+        RuntimeSettings.from_env({**base, "GONGWEN_LLM_BASE_URL": "http://models.example.test/v1"})
+    with pytest.raises(ValueError, match="GONGWEN_ALLOW_INSECURE_LOCAL_MODEL"):
+        RuntimeSettings.from_env({**base, "GONGWEN_LLM_BASE_URL": "http://127.0.0.1:11434/v1"})
+    with pytest.raises(ValueError, match="不含参数或用户信息"):
+        RuntimeSettings.from_env(
+            {**base, "GONGWEN_LLM_BASE_URL": "https://fixture-user@models.example.test/v1"}
+        )
+
+    local = RuntimeSettings.from_env(
+        {
+            **base,
+            "GONGWEN_LLM_BASE_URL": "http://127.0.0.1:11434/v1",
+            "GONGWEN_ALLOW_INSECURE_LOCAL_MODEL": "true",
+        }
+    )
+    assert local.allow_insecure_local_model is True
+    assert local.server_provider is not None
+    assert local.server_provider.base_url == "http://127.0.0.1:11434/v1"
+
+
+def test_yanzhang_environment_names_take_precedence_over_legacy_names() -> None:
+    settings = RuntimeSettings.from_env(
+        {
+            "GONGWEN_ENV": "development",
+            "YANZHANG_ENV": "test",
+            "GONGWEN_PORT": "8787",
+            "YANZHANG_PORT": "9898",
+            "GONGWEN_ACCESS_TOKEN": "legacy-token",
+            "YANZHANG_ACCESS_TOKEN": "current-token",
+            "YANZHANG_LLM_PROVIDER": "openai",
+            "YANZHANG_LLM_MODEL": "writing-model",
+            "YANZHANG_LLM_API_KEY": "model-secret",
+        }
+    )
+
+    assert settings.environment == "test"
+    assert settings.bind_port == 9898
+    assert settings.access_token == "current-token"
+    assert settings.server_provider is not None
+    assert settings.server_provider.model == "writing-model"
     with pytest.raises(ValueError, match="尚未注册"):
         RuntimeSettings.from_env(
             {
@@ -191,6 +271,55 @@ def test_server_provider_aliases_are_normalized_and_unknown_names_fail_fast() ->
                 "GONGWEN_LLM_API_KEY": "fixture-secret",
             }
         )
+
+
+def test_non_loopback_listener_requires_strong_independent_credentials() -> None:
+    web_token = "fixture-web-token-with-at-least-32-bytes"
+    mcp_token = "fixture-mcp-token-with-at-least-32-bytes"
+
+    for host in ("0.0.0.0", "::", "192.0.2.10", "docs.example.test"):
+        with pytest.raises(ValueError, match="GONGWEN_ACCESS_TOKEN"):
+            RuntimeSettings(bind_host=host)
+
+    with pytest.raises(ValueError, match="GONGWEN_MCP_ACCESS_TOKEN"):
+        RuntimeSettings(bind_host="0.0.0.0", access_token=web_token)
+    with pytest.raises(ValueError, match="至少需要 32 字节"):
+        RuntimeSettings(
+            bind_host="0.0.0.0",
+            access_token="short",
+            mcp_access_token=mcp_token,
+        )
+    with pytest.raises(ValueError, match="至少需要 32 字节"):
+        RuntimeSettings(
+            bind_host="0.0.0.0",
+            access_token=web_token,
+            mcp_access_token="short",
+        )
+    with pytest.raises(ValueError, match="分开设置"):
+        RuntimeSettings(
+            bind_host="0.0.0.0",
+            access_token=web_token,
+            mcp_access_token=web_token,
+        )
+
+    protected = RuntimeSettings(
+        bind_host="0.0.0.0",
+        access_token=web_token,
+        mcp_access_token=mcp_token,
+    )
+    public_web = RuntimeSettings(
+        bind_host="0.0.0.0",
+        allow_unauthenticated=True,
+        mcp_access_token=mcp_token,
+    )
+    assert protected.access_token_required is True
+    assert public_web.access_token_required is False
+
+
+def test_loopback_listener_keeps_credential_free_local_development() -> None:
+    for host in ("127.0.0.1", "127.0.0.2", "::1", "[::1]", "localhost", "LOCALHOST."):
+        settings = RuntimeSettings(bind_host=host)
+        settings.validate_effective_bind_host(host)
 
 
 def test_bootstrap_reports_explicit_people_search_opt_in(storage: GongwenStorage) -> None:

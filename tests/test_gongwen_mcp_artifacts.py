@@ -12,12 +12,24 @@ from pathlib import Path
 import pytest
 
 from gongwen_mcp.artifacts import (
+    CSV_MIME,
     DEFAULT_MAX_TOTAL_BYTES,
     DEFAULT_TTL_SECONDS,
     DOCX_MIME,
+    HTML_MIME,
+    LATEX_MIME,
+    MARKDOWN_MIME,
+    MAX_CSV_BYTES,
     MAX_DOCX_BYTES,
+    MAX_HTML_BYTES,
+    MAX_LATEX_BYTES,
+    MAX_MARKDOWN_BYTES,
+    MAX_PDF_BYTES,
+    MAX_TEXT_BYTES,
     MAX_ZIP_BYTES,
+    PDF_MIME,
     STALE_TEMP_GRACE_SECONDS,
+    TEXT_MIME,
     ZIP_MIME,
     ArtifactCorrupt,
     ArtifactNotFound,
@@ -26,6 +38,7 @@ from gongwen_mcp.artifacts import (
     InvalidArtifactId,
     UnsupportedArtifactType,
     artifact_resource_uri,
+    project_artifact_resource_uri,
 )
 from yanzhang.storage import LocalStorage, StoredObject
 
@@ -120,6 +133,128 @@ def test_artifact_round_trip_is_persistent_and_metadata_is_json_safe(tmp_path: P
     assert (tmp_path / "exports" / f"{metadata.artifact_id}.docx").read_bytes() == payload
 
 
+def test_project_scoped_metadata_persists_and_enforces_read_scope(tmp_path: Path) -> None:
+    payload = "项目交付".encode()
+    store = ArtifactStore(tmp_path)
+    metadata = store.put(
+        payload,
+        filename="项目交付.txt",
+        mime=TEXT_MIME,
+        project_id="项目 A",
+        asset_id="asset-a",
+        revision_id="revision-a",
+        creator="yanzhang_export_asset",
+    )
+
+    assert metadata.project_id == "项目 A"
+    assert metadata.asset_id == "asset-a"
+    assert metadata.revision_id == "revision-a"
+    assert metadata.creator == "yanzhang_export_asset"
+    assert metadata.resource_uri == project_artifact_resource_uri("项目 A", metadata.artifact_id)
+    assert "%E9%A1%B9%E7%9B%AE%20A" in metadata.resource_uri
+    assert store.read_bytes(metadata.artifact_id, project_id="项目 A") == payload
+    with pytest.raises(ArtifactNotFound):
+        store.read_bytes(metadata.artifact_id, project_id="项目 B")
+    with pytest.raises(ArtifactNotFound):
+        store.read_bytes(metadata.artifact_id, legacy_only=True)
+
+    restarted = ArtifactStore(tmp_path)
+    assert restarted.get_metadata(metadata.artifact_id, project_id="项目 A") == metadata
+
+
+def test_legacy_metadata_sidecar_defaults_to_v1_creator(tmp_path: Path) -> None:
+    created = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
+    store = ArtifactStore(tmp_path, clock=_Clock(created))
+    metadata = store.put(b"legacy", filename="legacy.txt", mime=TEXT_MIME)
+    sidecar = tmp_path / "exports" / f"{metadata.artifact_id}.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    payload.pop("creator")
+    payload.pop("project_id")
+    payload.pop("asset_id")
+    payload.pop("revision_id")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    reopened = ArtifactStore(tmp_path, clock=_Clock(created))
+    loaded = reopened.get_metadata(metadata.artifact_id)
+    assert loaded.creator == "gongwen_v1"
+    assert loaded.project_id is None
+    assert reopened.read_bytes(metadata.artifact_id, legacy_only=True) == b"legacy"
+
+
+def test_partial_project_scope_metadata_is_rejected(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match="requires project, asset and revision"):
+        store.put(
+            b"partial",
+            filename="partial.txt",
+            mime=TEXT_MIME,
+            project_id="project-a",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mime", "extension", "payload"),
+    [
+        (DOCX_MIME, ".docx", b"PK\x03\x04docx"),
+        (ZIP_MIME, ".zip", b"PK\x03\x04zip"),
+        (PDF_MIME, ".pdf", b"%PDF-1.7\n%%EOF"),
+        (MARKDOWN_MIME, ".md", "# 标题\n\n正文".encode()),
+        (TEXT_MIME, ".txt", "纯文本正文".encode()),
+        (HTML_MIME, ".html", "<!doctype html><title>标题</title>".encode()),
+        (LATEX_MIME, ".tex", b"\\documentclass{article}\\begin{document}x\\end{document}"),
+        (CSV_MIME, ".csv", "标题,状态\n材料,完成\n".encode()),
+    ],
+)
+def test_every_supported_export_has_fixed_mime_extension_and_integrity(
+    tmp_path: Path,
+    mime: str,
+    extension: str,
+    payload: bytes,
+) -> None:
+    created = datetime(2026, 9, 4, 9, tzinfo=UTC)
+    store = ArtifactStore(tmp_path, clock=_Clock(created))
+
+    metadata = store.put(payload, filename="../../通用导出.wrong", mime=mime.upper())
+
+    assert metadata.filename == f"通用导出.wrong{extension}"
+    assert metadata.mime == mime
+    assert metadata.size == len(payload)
+    assert metadata.sha256 == hashlib.sha256(payload).hexdigest()
+    assert metadata.created_at == created
+    assert metadata.expires_at == created + timedelta(seconds=DEFAULT_TTL_SECONDS)
+    assert metadata.resource_uri == artifact_resource_uri(metadata.artifact_id)
+    assert store.read(metadata.artifact_id) == payload
+
+    public_json = json.dumps(metadata.model_dump(mode="json"), ensure_ascii=False)
+    assert str(tmp_path) not in public_json
+    expected_path = tmp_path / "exports" / f"{metadata.artifact_id}{extension}"
+    assert expected_path.read_bytes() == payload
+
+    restarted = ArtifactStore(tmp_path, clock=_Clock(created))
+    assert restarted.get_metadata(metadata.artifact_id) == metadata
+    assert restarted.read_bytes(metadata.artifact_id) == payload
+
+
+@pytest.mark.parametrize(
+    "mime",
+    (PDF_MIME, MARKDOWN_MIME, TEXT_MIME, HTML_MIME, LATEX_MIME, CSV_MIME),
+)
+def test_universal_exports_use_the_existing_expiry_mechanism(
+    tmp_path: Path,
+    mime: str,
+) -> None:
+    clock = _Clock(datetime(2026, 9, 4, 10, tzinfo=UTC))
+    store = ArtifactStore(tmp_path, clock=clock, ttl_seconds=5)
+    metadata = store.put(b"fixture", filename="expiring", mime=mime)
+
+    clock.value += timedelta(seconds=6)
+
+    with pytest.raises(ArtifactNotFound):
+        store.read_bytes(metadata.artifact_id)
+    assert not any(path.stem == metadata.artifact_id for path in (tmp_path / "exports").iterdir())
+
+
 def test_filename_is_display_only_and_never_selects_a_storage_path(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path)
 
@@ -169,6 +304,12 @@ def test_per_type_limits_and_repository_defaults_are_exact(
 ) -> None:
     assert MAX_DOCX_BYTES == 16 * 1024 * 1024
     assert MAX_ZIP_BYTES == 64 * 1024 * 1024
+    assert MAX_PDF_BYTES == 32 * 1024 * 1024
+    assert MAX_MARKDOWN_BYTES == 8 * 1024 * 1024
+    assert MAX_TEXT_BYTES == 8 * 1024 * 1024
+    assert MAX_HTML_BYTES == 16 * 1024 * 1024
+    assert MAX_LATEX_BYTES == 8 * 1024 * 1024
+    assert MAX_CSV_BYTES == 16 * 1024 * 1024
     assert DEFAULT_MAX_TOTAL_BYTES == 2 * 1024 * 1024 * 1024
     store = ArtifactStore(tmp_path)
 
@@ -182,6 +323,10 @@ def test_per_type_limits_and_repository_defaults_are_exact(
         store.put(b"1234", filename="large.docx", mime=DOCX_MIME)
     with pytest.raises(ArtifactTooLarge):
         store.put(b"123456", filename="large.zip", mime=ZIP_MIME)
+    for mime in (PDF_MIME, MARKDOWN_MIME, TEXT_MIME, HTML_MIME, LATEX_MIME, CSV_MIME):
+        monkeypatch.setitem(artifacts._LIMIT_BY_MIME, mime, 1)
+        with pytest.raises(ArtifactTooLarge):
+            store.put(b"12", filename="large", mime=mime)
     with pytest.raises(UnsupportedArtifactType):
         store.put(b"x", filename="payload.bin", mime="application/octet-stream")
 

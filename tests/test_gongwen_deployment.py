@@ -179,7 +179,7 @@ def test_deployment_uses_one_protected_non_root_worker_and_atomic_token_update()
     assert "GONGWEN_CLIENT_LLM_BASE_URL_ALLOWLIST=" in env_example
     assert "GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH=false" in env_example
     assert "GONGWEN_CLIENT_LLM_BASE_URL_ALLOWLIST" in readme
-    assert "不限制由运维人员设置的 `GONGWEN_LLM_BASE_URL`" in readme
+    assert "`GONGWEN_ALLOW_INSECURE_LOCAL_MODEL=true`" in readme
 
     requirements = (_DEPLOY / "requirements.lock").read_text(encoding="utf-8")
     assert "uv export --format requirements.txt --no-dev --no-emit-project --locked" in requirements
@@ -402,3 +402,244 @@ def test_bind_address_helpers_normalize_ipv4_ipv6_and_localhost() -> None:
         )
     )
     subprocess.run(["sh", "-c", command], check=True)
+
+
+def test_v02_deployment_uses_primary_names_and_local_first_defaults() -> None:
+    compose = (_DEPLOY / "compose.yaml").read_text(encoding="utf-8")
+    caddy = (_DEPLOY / "Caddyfile").read_text(encoding="utf-8")
+    env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "YANZHANG_ENV: production" in compose
+    assert "YANZHANG_DATA_DIR: /var/lib/gongwen" in compose
+    assert "GONGWEN_DATA_DIR: /var/lib/gongwen" in compose
+    assert "YANZHANG_ACCESS_TOKEN:" in compose
+    assert "GONGWEN_ACCESS_TOKEN:" in compose
+    assert "${YANZHANG_ACCESS_TOKEN:-${GONGWEN_ACCESS_TOKEN:-" in compose
+    assert "${YANZHANG_BIND_ADDRESS:-${GONGWEN_BIND_ADDRESS:-127.0.0.1}}" in compose
+    assert "${YANZHANG_DATA_VOLUME:-${GONGWEN_DATA_VOLUME:-gongwen-web-data}}" in compose
+    assert "- gongwen-data:/var/lib/gongwen" in compose
+    assert "{$YANZHANG_SITE_ADDRESS}" in caddy
+    assert "{$YANZHANG_PROXY_MAX_REQUEST_SIZE:2MB}" in caddy
+
+    assert "YANZHANG_ENV=development" in env_example
+    assert "YANZHANG_HOST=127.0.0.1" in env_example
+    assert "YANZHANG_BIND_ADDRESS=127.0.0.1" in env_example
+    assert "YANZHANG_SITE_ADDRESS=:80" in env_example
+    assert "YANZHANG_DATA_VOLUME=gongwen-web-data" in env_example
+    assert "YANZHANG_ACCESS_TOKEN=CHANGE_ME_" in env_example
+    active_lines = [line for line in env_example.splitlines() if line and not line.startswith("#")]
+    assert not any(line.startswith("GONGWEN_") for line in active_lines)
+
+
+def test_v02_operator_scripts_are_valid_private_and_cover_lifecycle() -> None:
+    scripts_dir = _DEPLOY / "scripts"
+    script_names = ("start.sh", "backup.sh", "restore.sh", "upgrade.sh", "health.sh")
+    for name in (*script_names, "config.sh"):
+        path = scripts_dir / name
+        subprocess.run(["sh", "-n", str(path)], check=True)
+        assert path.is_file()
+    for name in script_names:
+        assert (scripts_dir / name).stat().st_mode & stat.S_IXUSR
+
+    config = (scripts_dir / "config.sh").read_text(encoding="utf-8")
+    start = (scripts_dir / "start.sh").read_text(encoding="utf-8")
+    backup = (scripts_dir / "backup.sh").read_text(encoding="utf-8")
+    restore = (scripts_dir / "restore.sh").read_text(encoding="utf-8")
+    upgrade = (scripts_dir / "upgrade.sh").read_text(encoding="utf-8")
+    health = (scripts_dir / "health.sh").read_text(encoding="utf-8")
+
+    assert 'primary_key="YANZHANG_${suffix}"' in config
+    assert 'legacy_key="GONGWEN_${suffix}"' in config
+    assert '. "${ENV_FILE}"' not in config + start + backup + restore + health
+    assert 'chmod 600 "${ENV_FILE}"' in start
+    assert "dotenv_write_key YANZHANG_ACCESS_TOKEN" in start
+    assert "YANZHANG_MCP_ACCESS_TOKEN must be independent" in start
+    assert 'echo "Generated a Web access token: ${YANZHANG_ACCESS_TOKEN}"' not in start
+    assert "--remove-orphans --wait --wait-timeout 120" in start
+    assert 'exec "${DEPLOY_DIR}/backup.sh"' in backup
+    assert 'exec "${DEPLOY_DIR}/restore.sh"' in restore
+    assert upgrade.index('"${SCRIPT_DIR}/backup.sh"') < upgrade.index("build --pull gongwen")
+    assert '"${SCRIPT_DIR}/health.sh"' in upgrade
+    assert "/api/v2/projects?limit=1" in health
+    assert "/api/v2/bootstrap" in health
+    assert '--header @"${AUTH_HEADER}"' in health
+    assert "unset YANZHANG_ACCESS_TOKEN GONGWEN_ACCESS_TOKEN" in health
+
+
+def test_v02_config_parser_prefers_primary_name_and_treats_values_as_data(
+    tmp_path: Path,
+) -> None:
+    sentinel = tmp_path / "executed"
+    env_file = tmp_path / ".env"
+    literal = f"$(touch {sentinel})"
+    env_file.write_text(
+        "\n".join(
+            (
+                "GONGWEN_ACCESS_TOKEN=legacy-value",
+                f"YANZHANG_ACCESS_TOKEN={literal}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    config = _DEPLOY / "scripts" / "config.sh"
+    command = (
+        f". {shlex.quote(str(config))}; "
+        f"config_resolve ACCESS_TOKEN {shlex.quote(str(env_file))} fallback"
+    )
+    environment = os.environ.copy()
+    environment.pop("YANZHANG_ACCESS_TOKEN", None)
+    environment.pop("GONGWEN_ACCESS_TOKEN", None)
+    result = subprocess.run(
+        ["sh", "-c", command],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == literal
+    assert not sentinel.exists()
+
+    env_file.write_text("GONGWEN_ACCESS_TOKEN=legacy-value\n", encoding="utf-8")
+    legacy = subprocess.run(
+        ["sh", "-c", command],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert legacy.stdout.strip() == "legacy-value"
+
+    env_file.write_text(
+        "YANZHANG_ACCESS_TOKEN=first\nYANZHANG_ACCESS_TOKEN=second\n",
+        encoding="utf-8",
+    )
+    duplicate = subprocess.run(
+        ["sh", "-c", command],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert duplicate.returncode == 65
+    assert "duplicate YANZHANG_ACCESS_TOKEN" in duplicate.stderr
+
+
+def test_v02_start_generates_primary_tokens_without_printing_them(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_docker.chmod(0o755)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "YANZHANG_ACCESS_TOKEN=CHANGE_ME_WITH_AT_LEAST_32_RANDOM_CHARACTERS",
+                "YANZHANG_MCP_ACCESS_TOKEN=CHANGE_ME_WITH_AN_INDEPENDENT_32_BYTE_RANDOM_TOKEN",
+                "YANZHANG_SITE_ADDRESS=:80",
+                "YANZHANG_BIND_ADDRESS=127.0.0.1",
+                "YANZHANG_HTTP_PORT=18080",
+                "YANZHANG_HTTPS_PORT=18443",
+                "YANZHANG_ALLOWED_HOSTS=127.0.0.1,localhost,[::1]",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "YANZHANG_ENV_FILE": str(env_file),
+            "YANZHANG_OPERATION_LOCK_DIR": str(tmp_path / ".operation.lock"),
+            "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+        }
+    )
+    for key in (
+        "YANZHANG_ACCESS_TOKEN",
+        "YANZHANG_MCP_ACCESS_TOKEN",
+        "GONGWEN_ACCESS_TOKEN",
+        "GONGWEN_MCP_ACCESS_TOKEN",
+    ):
+        environment.pop(key, None)
+
+    result = subprocess.run(
+        ["sh", str(_DEPLOY / "scripts" / "start.sh")],
+        cwd=_ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = {
+        key: value
+        for line in env_file.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+        for key, _, value in (line.partition("="),)
+    }
+    web_token = values["YANZHANG_ACCESS_TOKEN"]
+    mcp_token = values["YANZHANG_MCP_ACCESS_TOKEN"]
+    assert len(web_token) >= 64
+    assert len(mcp_token) >= 64
+    assert web_token != mcp_token
+    assert web_token not in result.stdout + result.stderr
+    assert mcp_token not in result.stdout + result.stderr
+    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+
+
+def test_v02_compose_primary_values_override_legacy_aliases(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        return
+    available = subprocess.run(
+        [docker, "compose", "version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if available.returncode != 0:
+        return
+    env_file = tmp_path / ".env"
+    primary_token = "FIXTURE_PRIMARY_" + ("p" * 32)
+    legacy_token = "FIXTURE_LEGACY_" + ("l" * 32)
+    env_file.write_text(
+        "\n".join(
+            (
+                "YANZHANG_BIND_ADDRESS=127.0.0.2",
+                "GONGWEN_BIND_ADDRESS=127.0.0.3",
+                "YANZHANG_DATA_VOLUME=yanzhang-v2-fixture-data",
+                "GONGWEN_DATA_VOLUME=legacy-fixture-data",
+                f"YANZHANG_ACCESS_TOKEN={primary_token}",
+                f"GONGWEN_ACCESS_TOKEN={legacy_token}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("YANZHANG_", "GONGWEN_"))
+    }
+    rendered = subprocess.run(
+        [
+            docker,
+            "compose",
+            "--env-file",
+            str(env_file),
+            "-f",
+            str(_DEPLOY / "compose.yaml"),
+            "config",
+        ],
+        cwd=_ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "host_ip: 127.0.0.2" in rendered
+    assert "name: yanzhang-v2-fixture-data" in rendered
+    assert f"YANZHANG_ACCESS_TOKEN: {primary_token}" in rendered
+    assert f"GONGWEN_ACCESS_TOKEN: {primary_token}" in rendered
+    assert legacy_token not in rendered

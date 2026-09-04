@@ -1,137 +1,131 @@
 ---
-name: gongwen-writing
-display_name: 砚章公文写作
-display_name_en: Gongwen Writing
-description: 使用砚章完成中文公文拟题、写作、改写、审校、文章来源检索、版本保存和 Word 导出；适用于讲话稿、汇报、总结、通知、请示、报告、函等任务。
-description_zh: 使用砚章完成中文公文拟题、写作、改写、审校、文章来源检索、版本保存和 Word 导出。
-description_en: Draft, revise, review, research, version, and export Chinese official documents with Gongwen.
+name: yanzhang-writing
+display_name: 砚章·AI文字工作台
+display_name_en: Yanzhang AI Writing Workbench
+description: 使用砚章完成公文、职场沟通、内容传播和学术研究写作；按项目组织资料，先做标题与开头，再生成块编辑母稿和渠道变体，建立证据链，完成六维审校、版本与导出。
+description_zh: 使用砚章完成公文、职场沟通、内容传播和学术研究写作，管理项目资料、母稿、变体、证据、审校、版本和交付。
+description_en: Create official, workplace, media, and academic writing with project sources, headlines, master drafts, channel variants, evidence, review, revisions, and export.
 category: writing
-version: 0.1.0-preview.1
+version: 0.2.0-preview.1
 author: Yanzhang
-allowed-tools: gongwen_get_status, gongwen_get_methods, gongwen_generate_titles, gongwen_generate_document, gongwen_rewrite_text, gongwen_review_document, gongwen_audit_document, gongwen_save_document, gongwen_list_documents, gongwen_read_document, gongwen_list_versions, gongwen_read_version, gongwen_delete_document, gongwen_list_article_sources, gongwen_search_articles, gongwen_read_article, gongwen_get_style_references, gongwen_import_article_text, gongwen_import_article_url, gongwen_collect_articles, gongwen_delete_article, gongwen_export_docx, gongwen_export_documents_zip, gongwen_mail_merge_docx, gongwen_test_model, gongwen_get_model_usage
+allowed-tools: yanzhang_get_status, yanzhang_list_scene_packs, yanzhang_get_scene_pack, yanzhang_create_project, yanzhang_list_projects, yanzhang_get_project, yanzhang_upsert_project_term, yanzhang_list_project_terms, yanzhang_delete_project_term, yanzhang_add_material, yanzhang_list_materials, yanzhang_get_material, yanzhang_search, yanzhang_generate_titles, yanzhang_create_workflow, yanzhang_run_workflow, yanzhang_get_workflow, yanzhang_cancel_workflow, yanzhang_list_assets, yanzhang_get_asset, yanzhang_create_variant, yanzhang_list_revisions, yanzhang_review_asset, yanzhang_export_asset, yanzhang_search_literature, yanzhang_import_literature, yanzhang_list_literature, yanzhang_get_literature, yanzhang_list_evidence, yanzhang_get_evidence, yanzhang_extract_evidence, yanzhang_build_literature_matrix, yanzhang_list_literature_matrices, yanzhang_get_literature_matrix, yanzhang_list_research_claims, yanzhang_get_research_claim, yanzhang_list_citation_links, yanzhang_get_citation_link, yanzhang_verify_citations, yanzhang_format_bibliography, yanzhang_suggest_academic_titles, yanzhang_create_academic_outline, yanzhang_draft_abstract, yanzhang_review_academic_integrity, yanzhang_prepare_rebuttal, gongwen_get_status, gongwen_get_methods, gongwen_generate_titles, gongwen_generate_document, gongwen_rewrite_text, gongwen_review_document, gongwen_audit_document, gongwen_save_document, gongwen_list_documents, gongwen_read_document, gongwen_list_versions, gongwen_read_version, gongwen_delete_document, gongwen_list_article_sources, gongwen_search_articles, gongwen_read_article, gongwen_get_style_references, gongwen_import_article_text, gongwen_import_article_url, gongwen_collect_articles, gongwen_delete_article, gongwen_export_docx, gongwen_export_documents_zip, gongwen_mail_merge_docx, gongwen_test_model, gongwen_get_model_usage
 ---
 
-# 砚章公文写作
+# 砚章·AI文字工作台
 
-当用户需要完成公文标题、正文、改写、审校、资料检索、服务端保存或 Word 导出时，优先调用本连接器。始终以用户提供的事实和已选文章来源为内容依据，把权威文章用于学习结构、标题节奏和表达方法，不把参考文章中的具体事实迁移到新文稿。
+在用户需要拟题、写作、改写、审校、资料检索、版本管理、渠道改编、学术引用或文件导出时使用
+本连接器。默认采用 v0.2 的 `yanzhang_*` 项目工作流；已有公文 ID、旧文章来源或旧自动化任务
+继续使用 `gongwen_*` 兼容工具。
 
-## 推荐工作流
+## 基本原则
 
-1. 首次调用先用 `gongwen_get_status` 检查服务和模型模式；再用 `gongwen_get_methods` 获取当前文种适用的标题公式与正文方法论。
-2. 用户要求参考党报党刊时，先用 `gongwen_list_article_sources` 查看来源；已有资料用 `gongwen_search_articles` 与 `gongwen_get_style_references`，指定范围采集用 `gongwen_collect_articles`。
-3. 先调用 `gongwen_generate_titles`，向用户展示排名、公式和推荐理由。用户选定标题后，再调用 `gongwen_generate_document`。后者会自动保存，记住返回的 `id` 和 `version`，生成后不追加一次 `gongwen_save_document`。
-4. `gongwen_generate_document` 的 `preview` 最多 4000 字；用返回的 `id` 调用 `gongwen_read_document` 分块读取全文。针对局部调整使用 `gongwen_rewrite_text`，全文定稿前依次调用 `gongwen_review_document` 和 `gongwen_audit_document`；这三个工具都不保存修改。
-5. 只有在保存手工组合或改写后的完整正文时才调用 `gongwen_save_document`。更新既有文稿时先读取最新 `current_version`，再把它作为 `expected_version` 提交。
-6. 最终交付根据已保存的 `document_id` 调用 `gongwen_export_docx`、`gongwen_export_documents_zip` 或 `gongwen_mail_merge_docx`；返回导出资源后，保留完整元数据 `artifact_id`、`filename`、`mime`、`size`、`sha256`、`resource_uri`、`created_at`、`expires_at`，ZIP 响应另有 `files`。
+1. 先确认交付目标、受众和渠道，再选择场景包与配方。
+2. 项目资料是事实边界。风格参考只用于学习结构、标题节奏和表达方法，不把其中的具体事实迁移
+   到新稿。
+3. 标题、开头、小标题和段首观点句优先于全文生成；向用户展示候选、评分和推荐理由，再进入
+   母稿。
+4. 母稿按内容块编辑；渠道内容由 `yanzhang_create_variant` 从明确版本派生，不手工覆盖母稿。
+5. 数字、日期、名称、直接引语和关键结论关联 Evidence/Citation；没有来源时保留待核实标记。
+6. 交付前运行六维审校：事实与证据、逻辑与结构、清晰与简洁、受众与语气、语言与规范、格式
+   与交付。
+7. 模型密钥、Web Token 和 MCP Token 不放入工具参数或回答。
 
-## 核心写作工具
+## 场景包
 
-| 工具 | 用途 | 关键输入 |
-| --- | --- | --- |
-| `gongwen_get_status` | 查看服务、存储、模型和能力状态 | 无 |
-| `gongwen_get_methods` | 获取文种、标题公式和正文方法论 | `document_type` |
-| `gongwen_generate_titles` | 批量拟题、评分、排序 | `topic`、`document_type`、`count`、`formula_ids`、`materials` |
-| `gongwen_generate_document` | 按选定标题和方法论生成正文并自动保存版本 | `topic`、`selected_title`、`document_type`、`materials`、`content_methodology_id` |
-| `gongwen_rewrite_text` | 润色、压缩、扩写或按指令改写局部文本 | `text`、`instruction`、`mode`、`tone` |
-| `gongwen_review_document` | 检查结构、篇幅、长句、模糊表达和占位符 | `title`、`content`、`document_type`、`materials` |
-| `gongwen_audit_document` | 将正文主张与用户材料进行事实证据映射 | `title`、`content`、`materials` |
+| 场景 | 配方 |
+| --- | --- |
+| `gongwen` 公文与综合材料 | `work-summary`、`briefing-material`、`implementation-plan`、`meeting-minutes` |
+| `workplace` 职场沟通 | `work-email`、`weekly-report`、`business-proposal`、`meeting-followup`、`presentation-outline` |
+| `media` 内容传播 | `press-release`、`wechat-article`、`social-post`、`short-video-script` |
+| `academic` 学术与研究写作 | `literature-review`、`research-outline`、`research-abstract`、`reviewer-response` |
 
-生成标题示例：
+不确定配方时先调用 `yanzhang_list_scene_packs`，再用 `yanzhang_get_scene_pack` 读取章节、渠道、
+所需输入和事实策略。
 
-```json
-{
-  "document_type": "讲话稿",
-  "topic": "树立和践行正确政绩观",
-  "purpose": "区委办公室副主任交流发言",
-  "materials": ["用户提供的工作事实和数据"],
-  "tone": "凝练有力",
-  "count": 10,
-  "formula_ids": ["material-parallel", "material-subtitle"]
-}
-```
+## 通用推荐工作流
 
-生成正文示例：
+1. 调用 `yanzhang_get_status`；确认项目、工作流、模型、学术与导出能力。
+2. 查找已有项目；没有匹配项时调用 `yanzhang_create_project`。
+3. 把用户确认的事实、风格参考、历史稿和笔记用 `yanzhang_add_material` 保存；首选术语与
+   不建议变体用 `yanzhang_upsert_project_term` 维护。长材料用 `yanzhang_get_material` 分块读取，
+   统一查询用 `yanzhang_search`。
+4. 调用 `yanzhang_generate_titles`。根据任务分别设置 `headline_kind` 为 `title`、`opening`、
+   `section_heading` 或 `topic_sentence`，展示排名后让用户确定方向。
+5. 调用 `yanzhang_create_workflow`，完整填写 topic、goal、audience、content_type、场景包、配方、
+   channel 和 `material_ids`；再用 `yanzhang_run_workflow` 执行。
+6. 后台模式用 `yanzhang_get_workflow` 查询。发生中断时先读取最新状态，再从明确的
+   `resume_from` 步骤恢复；用户终止任务时用 `yanzhang_cancel_workflow`。
+7. 使用返回的资产 ID 调用 `yanzhang_get_asset` 分块读取全文；需要邮件、会议、PPT、网页、社交
+   或学术版本时调用 `yanzhang_create_variant`。
+8. 用 `yanzhang_review_asset` 审校，结合项目资料逐条处理问题；调用
+   `yanzhang_list_revisions` 核对历史版本。
+9. 用户确认资产和版本后调用 `yanzhang_export_asset`。DOCX 可选 `template_id=standard`
+   或 `brief`；其他格式不携带该字段。保留返回的文件名、媒体类型、大小、哈希、资源标识和版本元数据。
 
-```json
-{
-  "document_type": "讲话稿",
-  "topic": "树立和践行正确政绩观",
-  "selected_title": "在一线察实情、在实干求实效、在长远见真章",
-  "purpose": "用于专题研讨交流",
-  "audience": "区委理论学习中心组",
-  "materials": "在此填入已经核对的本地区事实、数据和时间节点",
-  "requirements": "三个排比式小标题；每段首句为观点句；保留待核实项",
-  "fact_lock": true,
-  "content_methodology_id": "speech-consensus-action"
-}
-```
+### 标题与开头提示
 
-生成正文的响应包含 `id`、`version`、`preview`、`preview_truncated` 和标题/提纲元数据。
-若让服务生成文稿 ID，省略 `document_id` 与 `expected_version`；若指定全新 ID，两者分别填写
-该 ID 与 `0`；若更新已有 ID，`expected_version` 填写刚读取到的 `current_version`。
+公文交流发言可先分别生成：
 
-## 文稿与版本
+- 8–12 个排比式大标题；
+- 3–5 组同构小标题；
+- 每节 2–3 个“判断—意义—行动”段首观点句；
+- 2 个不同节奏的开场段。
 
-- `gongwen_generate_document`：生成后已经保存，直接使用返回的 `id` 和 `version`。
-- `gongwen_save_document`：保存手工编写、组合或改写后的正文。由服务生成 ID 时同时省略 `document_id` 与 `expected_version`；指定全新 `document_id` 时使用 `expected_version: 0`；更新时使用读取结果里的最新 `current_version`。
-- `gongwen_list_documents` / `gongwen_read_document`：按分页或标识读取文稿；正文默认每次读取 8000 字，可用 `next_offset` 继续，单块最多 20000 字。
-- `gongwen_list_versions` / `gongwen_read_version`：查询不可变历史版本。
-- `gongwen_delete_document`：仅在用户明确提出删除具体文稿时调用，并先复述文稿标题与标识。
+候选比较维度包括主题切合、结构完整、节奏、辨识度、受众适配与事实边界。用户选定大标题和
+小标题后，再把选择写入工作流约束，减少正文结构漂移。
 
-发生版本冲突时，读取最新文稿和版本，向用户说明双方差异，再保存合并后的内容。
+## 学术工作流
 
-## 文章来源库
+1. 创建 `academic` 项目并明确研究问题、学科、目标读者、方法说明和目标期刊要求。
+2. 先用 `yanzhang_list_literature` 恢复项目已有文献；需继续上次工作时，同步列出 evidence、
+   matrices、claims 与 citation-links。已有元数据用 `yanzhang_import_literature` 导入
+   BibTeX、RIS 或 CSL-JSON；需要公开查找时用 `yanzhang_search_literature`。两种方式返回的记录
+   都保存在当前项目。
+3. 用 `yanzhang_get_literature` 核对题名、作者、年份、DOI、来源和
+   `metadata_verified`。DOI 规范化本身不是元数据核验。
+4. 从用户提供的原文提取 `yanzhang_extract_evidence`；保留 `record_id`、来源哈希、页码、段落
+   或字符位置。
+5. `yanzhang_build_literature_matrix` 比较研究对象、方法、发现、局限和主题；随后调用
+   `yanzhang_suggest_academic_titles` 与 `yanzhang_create_academic_outline`。
+6. 对正文中的关键 `ResearchClaim` 建立 `ClaimCitationLink`，用
+   `yanzhang_verify_citations` 检查未知文献、来源错配和支撑度。
+7. `yanzhang_draft_abstract` 只使用已确认的研究简报、主张和引用链；缺少结果或方法信息时保留
+   明确待补项。
+8. `yanzhang_review_academic_integrity` 检查缺引、元数据缺失、直接引语缺页码、数字证据、来源
+   哈希和期刊要求。方法、统计和核心结论交给作者逐项复核。
+9. `yanzhang_format_bibliography` 提供 GB/T 7714、APA、MLA、Chicago 基础著录；对照目标期刊
+   的具体版本和格式细则。审稿回复用 `yanzhang_prepare_rebuttal`，每条回复关联实际修改位置。
 
-- `gongwen_list_article_sources`：获取当前支持的权威媒体和手动来源。
-- `gongwen_search_articles` / `gongwen_read_article`：搜索元数据并按需读取正文。
-- `gongwen_get_style_references`：输入搜索后选定的 `article_ids`（1–8 个），提取结构参考；`max_excerpt_chars` 默认 360、范围 80–1000。
-- `gongwen_import_article_text`：导入用户粘贴且注明来源的文章。
-- `gongwen_import_article_url`：导入用户指定的文章 URL。
-- `gongwen_collect_articles`：按 `keywords`、`source_ids`、`start_date`、`end_date` 和 `limit` 执行有界采集。
-- `gongwen_delete_article`：仅在用户明确提出删除指定文章来源时调用。
+列表工具均使用 `limit` / `offset` 分页，单条读取工具在继续写作前复核完整记录。
 
-采集示例：
+## 兼容公文流程
 
-```json
-{
-  "keywords": ["正确政绩观", "为民造福"],
-  "source_ids": ["gmw", "qiushi"],
-  "start_date": "2025-01-01",
-  "end_date": "2026-09-04",
-  "limit": 20
-}
-```
+当用户给出旧 `document_id`、旧文章 ID 或明确沿用既有公文自动化时：
 
-人民网自动检索默认关闭；仅当部署者显式设置
-`GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH=true`，且用户接受关键词与日期范围经 HTTP 明文传输时，
-才把 `people` 加入 `source_ids`。人民网 HTTPS 文章链接仍可用导入工具手工读取。
+1. `gongwen_get_status` 与 `gongwen_get_methods` 检查服务和方法；
+2. `gongwen_search_articles` / `gongwen_get_style_references` 选择结构参考，范围采集使用
+   `gongwen_collect_articles`；
+3. `gongwen_generate_titles` 先拟题，再用 `gongwen_generate_document` 自动保存；生成后不要紧接
+   着调用 `gongwen_save_document`；
+4. 返回的 `preview` 最多 4000 字，全文由 `gongwen_read_document` 分块读取；
+5. 局部处理用 `gongwen_rewrite_text`，定稿前调用 `gongwen_review_document` 和
+   `gongwen_audit_document`；这些工具不保存修改；
+6. 只有保存手工组合后的完整正文才用 `gongwen_save_document`。更新时传最新
+   `current_version` 作为 `expected_version`；
+7. 最终根据保存的 ID 调用 DOCX、ZIP 或 Word 字段批量导出工具。
 
-引用文章来源时附上标题、来源、发布日期和原始 URL。生成正文时只吸收结构和表达特征，事实内容仍以用户材料和审校结果为准。
+人民网自动检索受部署开关控制；未启用时使用 HTTPS 文章链接手工导入或选择其他 HTTPS 来源。
+引用文章来源时附标题、来源、发布日期和原始 URL。
 
-## 导出与模型
+## 响应与故障处理
 
-- `gongwen_export_docx`：导出单篇 Word 文档。
-- `gongwen_export_documents_zip`：把多篇成稿导出为 ZIP。
-- `gongwen_mail_merge_docx`：使用 Word 字段模板和数据行批量生成文档。
-- `gongwen_test_model`：检查当前引擎用 `auto`；用户明确要求测试真实模型连接时使用 `engine: server`。
-- `gongwen_get_model_usage`：读取服务端记录的模型调用与用量摘要。
+- 参数提示：按字段路径修正枚举、长度、列表或未定义字段。
+- 项目资源未找到：核对 `project_id` 与资源 ID 是否属于同一项目。
+- 后台任务超时：先查询工作流，确认步骤和输出资产，再决定恢复。
+- 并发版本冲突：读取最新版本，比较内容块后以新版本号保存合并结果。
+- 请求过大：按章节、资料或文献批次分块处理，并保留原来源定位。
+- 频率限制：遵循等待时间并缩小并发或检索数量。
+- 导出过期：从原资产和指定版本重新执行导出。
+- 引用提示：未知文献、哈希错配、缺页码、数字无证据和低支撑度保留为人工复核项。
 
-模型类工具只使用 `engine` 选择 `auto`、`server` 或 `local`。`auto` 在服务端模型就绪时调用
-真实模型，否则使用本地确定性引擎；工具参数中不放 Provider、API Key、模型 URL 或访问令牌。
-
-导出产物默认有效期为 24 小时；使用返回的 `gongwen://exports/{artifact_id}` 读取文件。DOCX
-单文件上限 16 MiB，ZIP 单文件上限 64 MiB，过期后重新执行相应导出工具。
-
-MCP 访问令牌由连接器注入。回答中隐藏令牌、模型密钥和完整认证请求头。
-
-## 常见响应处理
-
-- 身份校验提示：引导用户在连接器设置中重新填写 MCP 访问令牌。
-- 参数校验提示：按工具返回的字段路径修正参数后再调用。
-- 并发版本冲突：读取最新版本并完成差异确认。
-- 请求过大：按章节或材料批次拆分，再分别审校和合并。
-- 频率限制：遵循服务返回的等待时间后继续。
-- 导出资源过期：重新执行相应导出工具取得新资源。
-
-连接器请求超时为 300 秒，用于覆盖长文生成、较长审校与文章采集；状态、方法和列表查询通常
-更快完成。
+连接器超时为 300 秒，用于长文生成、审校、外部检索和导出；状态、目录和列表操作通常更快。

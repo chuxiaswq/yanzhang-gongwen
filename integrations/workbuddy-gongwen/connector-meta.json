@@ -1,25 +1,25 @@
 {
-  "name": "砚章公文写作",
-  "name_zh": "砚章公文写作",
-  "name_en": "Gongwen Writing",
-  "description": "Draft, revise, review, research, store, and export Chinese official documents.",
-  "description_zh": "完成公文拟题、成文、改写、审校、资料检索、版本管理与 Word 导出。",
-  "description_en": "Draft, revise, review, research, store, and export Chinese official documents.",
-  "source": "gongwen-writing",
+  "name": "砚章·AI文字工作台",
+  "name_zh": "砚章·AI文字工作台",
+  "name_en": "Yanzhang AI Writing Workbench",
+  "description": "面向公文、职场、内容传播和学术研究的项目化 AI 文字工作台，支持资料、标题、母稿、渠道变体、证据链、审校、版本与导出。",
+  "description_zh": "面向公文、职场、内容传播和学术研究的项目化 AI 文字工作台，支持资料、标题、母稿、渠道变体、证据链、审校、版本与导出。",
+  "description_en": "A project-based AI writing workbench for official, workplace, media, and academic writing with sources, headlines, master drafts, channel variants, evidence, review, revisions, and export.",
+  "source": "yanzhang-writing",
   "type": "mcp",
-  "version": "0.1.0-preview.1",
+  "version": "0.2.0-preview.1",
   "minWorkbuddyVersion": "4.23.0",
   "auth_mode": "token",
   "examples_zh": [
-    "围绕政绩观生成十个排比式标题，并说明推荐理由",
-    "检索权威文章来源，按三段式方法起草一篇讲话稿",
-    "审校这篇材料中的事实、占位符和表达问题",
-    "保存当前文稿并导出带 Word 域的模板"
+    "创建一个汇报材料项目，导入事实资料，先生成排比式大标题、小标题和段首观点句",
+    "把周报母稿派生为会后邮件和 PPT 提纲，并完成六维审校",
+    "把新闻稿改写为公众号文章、社交媒体帖和短视频脚本",
+    "导入 BibTeX 文献，提取证据、建立引用关系并检查学术完整性"
   ],
   "examples_en": [
-    "Generate ten parallel-style titles about performance evaluation and rank them",
-    "Research official articles and draft a three-part speech",
-    "Review this document for factual support, placeholders, and style issues",
-    "Save the current draft and export a Word field template"
+    "Create a briefing project, add factual sources, and compare parallel headlines and topic sentences",
+    "Turn a weekly-report master into a follow-up email and presentation outline, then review both",
+    "Adapt a press release into a web article, social post, and short-video script",
+    "Import BibTeX records, extract evidence, link citations, and review academic integrity"
   ]
 }

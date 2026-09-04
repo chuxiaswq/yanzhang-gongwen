@@ -8,12 +8,13 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import PurePath
 from xml.sax.saxutils import escape
 
 from gongwen_web.models import BatchExportRequest, ExportDocument
 from gongwen_web.resource_limits import MAX_BATCH_EXPANDED_CHARACTERS
+from yanzhang_core.models import ContentBlock
 
 _HEADING = re.compile(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[.、])")
 _INVALID_FILENAME = re.compile(r"[\\/:*?\"<>|\x00-\x1f]+")
@@ -23,13 +24,37 @@ _MERGE_FIELD = re.compile(r"\{\{\s*([^{}\r\n]{1,80}?)\s*\}\}")
 def build_docx(document: ExportDocument) -> bytes:
     """Return a valid minimal DOCX package using only the standard library."""
 
+    return _build_docx_package(document, _document_xml(document))
+
+
+def build_docx_from_blocks(
+    title: str,
+    blocks: Sequence[ContentBlock],
+    *,
+    template_style: str = "standard",
+) -> bytes:
+    """Build a DOCX from typed blocks while preserving explicit heading levels."""
+
+    if template_style not in {"standard", "brief"}:
+        raise ValueError("template_style 应为 standard 或 brief")
+    document = ExportDocument(
+        title=title,
+        content="structured-block-export",
+        template_style=template_style,
+    )
+    return _build_docx_package(document, _structured_document_xml(document, blocks))
+
+
+def _build_docx_package(document: ExportDocument, document_xml: str) -> bytes:
+    """Write the shared deterministic OOXML package around one document body."""
+
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         _write_part(archive, "[Content_Types].xml", _content_types())
         _write_part(archive, "_rels/.rels", _package_relationships())
         _write_part(archive, "docProps/core.xml", _core_properties(document))
         _write_part(archive, "docProps/app.xml", _app_properties())
-        _write_part(archive, "word/document.xml", _document_xml(document))
+        _write_part(archive, "word/document.xml", document_xml)
         _write_part(archive, "word/styles.xml", _styles_xml())
         _write_part(archive, "word/settings.xml", _settings_xml())
         _write_part(archive, "word/_rels/document.xml.rels", _document_relationships())
@@ -253,7 +278,47 @@ def _document_xml(document: ExportDocument) -> str:
         paragraphs.append(_paragraph(issuer, "right", style))
     if issue_date:
         paragraphs.append(_paragraph(issue_date, "right", style))
-    body = "".join(paragraphs)
+    return _wrap_document_xml("".join(paragraphs), style)
+
+
+def _structured_document_xml(
+    document: ExportDocument,
+    blocks: Sequence[ContentBlock],
+) -> str:
+    style: str = document.template_style
+    paragraphs = [_paragraph(document.title, "title", style)]
+    normalized_title = _normalized_text(document.title)
+    for block in sorted(blocks, key=lambda item: item.order):
+        text = block.text.strip()
+        if not text:
+            continue
+        if block.kind == "title" and _normalized_text(text) == normalized_title:
+            continue
+        lines = tuple(line.strip() for line in text.splitlines() if line.strip()) or (text,)
+        if block.kind == "heading":
+            paragraphs.append(
+                _paragraph(
+                    lines[0],
+                    "heading",
+                    style,
+                    heading_level=block.heading_level or 1,
+                )
+            )
+            paragraphs.extend(_paragraph(line, "body", style) for line in lines[1:])
+        elif block.kind == "title":
+            paragraphs.extend(_paragraph(line, "title", style) for line in lines)
+        elif block.kind == "subtitle":
+            paragraphs.extend(_paragraph(line, "center", style) for line in lines)
+        else:
+            paragraphs.extend(_paragraph(line, "body", style) for line in lines)
+    return _wrap_document_xml("".join(paragraphs), style)
+
+
+def _normalized_text(value: str) -> str:
+    return "".join(value.split())
+
+
+def _wrap_document_xml(body: str, style: str) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -270,13 +335,20 @@ def _document_xml(document: ExportDocument) -> str:
     )
 
 
-def _paragraph(text: str, kind: str, template_style: str) -> str:
+def _paragraph(
+    text: str,
+    kind: str,
+    template_style: str,
+    *,
+    heading_level: int = 1,
+) -> str:
     clean = text.strip()
     if not clean:
         return "<w:p/>"
     if kind == "title":
         properties = (
-            '<w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="560" '
+            '<w:pPr><w:pStyle w:val="Title"/><w:jc w:val="center"/>'
+            '<w:spacing w:before="0" w:after="560" '
             'w:line="560" w:lineRule="exact"/></w:pPr>'
         )
         run = _runs(
@@ -286,8 +358,10 @@ def _paragraph(text: str, kind: str, template_style: str) -> str:
             bold=template_style == "brief",
         )
     elif kind == "heading":
+        level = min(max(heading_level, 1), 6)
         properties = (
-            '<w:pPr><w:keepNext/><w:spacing w:before="280" w:after="0" '
+            f'<w:pPr><w:pStyle w:val="Heading{level}"/><w:outlineLvl w:val="{level - 1}"/>'
+            '<w:keepNext/><w:spacing w:before="280" w:after="0" '
             'w:line="560" w:lineRule="exact"/></w:pPr>'
         )
         run = _runs(
@@ -428,6 +502,13 @@ def _styles_xml() -> str:
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="仿宋_GB2312" w:hAnsi="仿宋_GB2312" w:eastAsia="仿宋_GB2312"/><w:sz w:val="32"/><w:lang w:val="zh-CN" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="560" w:lineRule="exact"/></w:pPr></w:pPrDefault></w:docDefaults>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="正文"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="标题"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="标题 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="标题 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="标题 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="标题 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading5"><w:name w:val="标题 5"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading6"><w:name w:val="标题 6"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/></w:style>
 </w:styles>"""
 
 
@@ -455,4 +536,10 @@ def _app_properties() -> str:
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>砚章公文写作工作台</Application><AppVersion>1.0</AppVersion></Properties>"""
 
 
-__all__ = ["build_batch_zip", "build_docx", "render_fields", "unique_filename"]
+__all__ = [
+    "build_batch_zip",
+    "build_docx",
+    "build_docx_from_blocks",
+    "render_fields",
+    "unique_filename",
+]

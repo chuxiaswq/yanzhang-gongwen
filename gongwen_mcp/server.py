@@ -14,10 +14,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import date
 from threading import RLock
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import unquote
 
 from mcp.server.fastmcp import FastMCP
@@ -64,6 +64,25 @@ from gongwen_mcp.tools import (
     GongwenTools,
     build_context,
 )
+from gongwen_mcp.writing_schemas import (
+    GetCitationLinkRequest,
+    GetEvidenceRequest,
+    GetLiteratureMatrixRequest,
+    GetLiteratureRequest,
+    GetResearchClaimRequest,
+    ListCitationLinksRequest,
+    ListEvidenceRequest,
+    ListLiteratureMatricesRequest,
+    ListLiteratureRequest,
+    ListResearchClaimsRequest,
+)
+from gongwen_mcp.writing_server import register_writing_tools
+from gongwen_mcp.writing_tools import (
+    YanzhangMCPContext,
+    YanzhangPlatform,
+    YanzhangToolError,
+    YanzhangWritingTools,
+)
 from gongwen_web.methodologies import CustomContentMethodology, CustomTitleFormula
 from gongwen_web.runtime import RuntimeSettings
 
@@ -87,9 +106,10 @@ type ExportReferences = Annotated[list[ExportDocumentRef], Field(min_length=1, m
 type MergeRows = Annotated[list[dict[str, JsonValue]], Field(min_length=1, max_length=200)]
 
 _SERVER_INSTRUCTIONS = """\
-砚章公文写作服务。先按文种读取写作方法，再拟定和比较标题；正文事实以用户材料为准。
-需要长期保存时使用文稿工具，需要 Word 文件时使用导出工具并读取返回的 gongwen:// 资源。
-文章来源用于学习标题、结构和表达方式，引用时保留标题、来源、日期与原始链接。
+砚章·AI文字工作台，同时提供兼容的公文工具与通用写作工具。新项目优先使用 yanzhang_ 工具，
+按“项目—资料—标题—工作流—资产—审校—导出”推进；学术任务使用文献、证据和引用核验工具。
+历史公文任务继续使用 gongwen_ 工具。正文事实以用户材料为准；v0.2 项目导出通过项目作用域的
+yanzhang:// 资源读取，v0.1 兼容导出继续使用 gongwen:// 资源。
 """
 
 
@@ -126,7 +146,7 @@ class _SanitizedFastMCP(FastMCP):
             return await super().call_tool(name, arguments)
         except ToolError as exc:
             cause = exc.__cause__
-            if isinstance(cause, GongwenToolError):
+            if isinstance(cause, (GongwenToolError, YanzhangToolError)):
                 raise ToolError(f"{cause.code}: {cause.message}") from None
             if isinstance(cause, ValidationError):
                 raise ToolError(_validation_error_message(cause)) from None
@@ -164,6 +184,32 @@ class _LazyRuntime:
             self._context.close()
 
 
+class _LazyYanzhangPlatform:
+    """Resolve the v2 platform only when a Yanzhang tool is first called."""
+
+    def __init__(self, runtime: _LazyRuntime) -> None:
+        self._runtime = runtime
+
+    def __getattr__(
+        self,
+        name: str,
+    ) -> Callable[[object], Awaitable[Mapping[str, object]]]:
+        if not name.startswith("yanzhang_"):
+            raise AttributeError(name)
+
+        async def invoke(request: object) -> Mapping[str, object]:
+            platform = self._runtime.context().yanzhang_platform
+            if platform is None:
+                raise YanzhangToolError("service_unavailable", "通用写作平台尚未初始化")
+            action = cast(
+                Callable[[object], Awaitable[Mapping[str, object]]],
+                getattr(platform, name),
+            )
+            return await action(request)
+
+        return invoke
+
+
 def create_server(
     context: GongwenMCPContext | None = None,
     *,
@@ -184,6 +230,10 @@ def create_server(
     )
     factory = context_factory or (lambda: build_context(settings=runtime_settings))
     runtime = _LazyRuntime(context, factory)
+    yanzhang_context = YanzhangMCPContext(
+        platform=cast(YanzhangPlatform, _LazyYanzhangPlatform(runtime))
+    )
+    yanzhang_tools = YanzhangWritingTools(yanzhang_context)
 
     server = _SanitizedFastMCP(
         "砚章公文写作",
@@ -869,14 +919,206 @@ def create_server(
         "gongwen://exports/{id}",
         name="gongwen_export",
         title="砚章导出文件",
-        description="读取导出工具生成且仍在有效期内的 DOCX 或 ZIP 二进制文件。",
+        description="读取导出工具生成且仍在有效期内的 Word、PDF、文本或压缩工件。",
         mime_type="application/octet-stream",
     )
     async def gongwen_export_resource(id: str) -> bytes:
         return await asyncio.to_thread(
             runtime.context().artifact_store.read,
             unquote(id),
+            legacy_only=True,
         )
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/exports/{artifact_id}",
+        name="yanzhang_project_export",
+        title="砚章项目导出文件",
+        description="按项目归属读取 v0.2 写作资产生成且仍在有效期内的导出工件。",
+        mime_type="application/octet-stream",
+    )
+    async def yanzhang_project_export_resource(project_id: str, artifact_id: str) -> bytes:
+        return await asyncio.to_thread(
+            runtime.context().artifact_store.read,
+            unquote(artifact_id),
+            project_id=unquote(project_id),
+        )
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/literature",
+        name="yanzhang_academic_literature",
+        title="砚章项目文献库",
+        description="读取项目已保存的前 100 条标准化文献记录。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_literature_resource(project_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_list_literature(
+            _request(
+                ListLiteratureRequest,
+                project_id=unquote(project_id),
+                include_abstract=True,
+                limit=100,
+                offset=0,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/literature/{record_id}",
+        name="yanzhang_academic_literature_record",
+        title="砚章项目文献记录",
+        description="按项目与记录标识读取文献元数据与来源追踪。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_literature_record_resource(project_id: str, record_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_get_literature(
+            _request(
+                GetLiteratureRequest,
+                project_id=unquote(project_id),
+                record_id=unquote(record_id),
+                include_abstract=True,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/evidence",
+        name="yanzhang_academic_evidence",
+        title="砚章项目证据片段",
+        description="读取项目已保存的前 100 条证据片段。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_evidence_resource(project_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_list_evidence(
+            _request(
+                ListEvidenceRequest,
+                project_id=unquote(project_id),
+                limit=100,
+                offset=0,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/evidence/{evidence_id}",
+        name="yanzhang_academic_evidence_item",
+        title="砚章项目证据记录",
+        description="按项目与证据标识读取来源谱系和精确片段。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_evidence_item_resource(project_id: str, evidence_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_get_evidence(
+            _request(
+                GetEvidenceRequest,
+                project_id=unquote(project_id),
+                evidence_id=unquote(evidence_id),
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/matrices",
+        name="yanzhang_academic_matrices",
+        title="砚章项目文献矩阵",
+        description="读取项目已保存的前 100 个文献比较矩阵。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_matrices_resource(project_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_list_literature_matrices(
+            _request(
+                ListLiteratureMatricesRequest,
+                project_id=unquote(project_id),
+                limit=100,
+                offset=0,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/matrices/{matrix_id}",
+        name="yanzhang_academic_matrix",
+        title="砚章项目文献矩阵记录",
+        description="按项目与矩阵标识读取完整文献矩阵。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_matrix_resource(project_id: str, matrix_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_get_literature_matrix(
+            _request(
+                GetLiteratureMatrixRequest,
+                project_id=unquote(project_id),
+                matrix_id=unquote(matrix_id),
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/claims",
+        name="yanzhang_academic_claims",
+        title="砚章项目研究主张",
+        description="读取项目已保存的前 100 条研究主张。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_claims_resource(project_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_list_research_claims(
+            _request(
+                ListResearchClaimsRequest,
+                project_id=unquote(project_id),
+                limit=100,
+                offset=0,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/claims/{claim_id}",
+        name="yanzhang_academic_claim",
+        title="砚章项目研究主张记录",
+        description="按项目与主张标识读取一条研究主张。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_claim_resource(project_id: str, claim_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_get_research_claim(
+            _request(
+                GetResearchClaimRequest,
+                project_id=unquote(project_id),
+                claim_id=unquote(claim_id),
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/citation-links",
+        name="yanzhang_academic_citation_links",
+        title="砚章项目引用链",
+        description="读取项目已保存的前 100 条主张—文献—证据关系。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_citation_links_resource(project_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_list_citation_links(
+            _request(
+                ListCitationLinksRequest,
+                project_id=unquote(project_id),
+                limit=100,
+                offset=0,
+            )
+        )
+        return _json_resource(result)
+
+    @server.resource(
+        "yanzhang://projects/{project_id}/academic/citation-links/{link_id}",
+        name="yanzhang_academic_citation_link",
+        title="砚章项目引用链记录",
+        description="按项目与引用链标识读取完整来源关系。",
+        mime_type="application/json",
+    )
+    async def yanzhang_academic_citation_link_resource(project_id: str, link_id: str) -> str:
+        result = await yanzhang_tools.yanzhang_get_citation_link(
+            _request(
+                GetCitationLinkRequest,
+                project_id=unquote(project_id),
+                link_id=unquote(link_id),
+            )
+        )
+        return _json_resource(result)
 
     @server.prompt(
         name="gongwen_title_workbench",
@@ -951,6 +1193,8 @@ def create_server(
             "人民网自动检索只在部署者显式开启后按需加入；其当前检索入口会明文传输"
             "关键词与日期范围。"
         )
+
+    register_writing_tools(server, yanzhang_context)
 
     server.__dict__["_gongwen_runtime"] = runtime
     return server

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -50,6 +51,7 @@ from gongwen_web.live import (
     rewrite_live,
 )
 from gongwen_web.methodologies import methodology_catalog
+from gongwen_web.model_gateway import build_model_callback
 from gongwen_web.models import (
     ArticleAutoCollectRequest,
     ArticleTextImportRequest,
@@ -62,6 +64,8 @@ from gongwen_web.runtime import InMemoryRateLimiter, RuntimeSettings, runtime_mi
 from gongwen_web.service import GongwenService
 from gongwen_web.storage import DocumentVersionConflict, GongwenStorage
 from gongwen_web.title_engine import generate_titles_demo
+from gongwen_web.v2 import v2_routes
+from gongwen_web.writing_service import YanzhangPlatformService
 from yanzhang.providers.content import ArticleDiscoveryProvider, ArticleFetcherProvider
 from yanzhang.providers.errors import (
     ProviderAuthenticationError,
@@ -72,8 +76,23 @@ from yanzhang.providers.errors import (
     ProviderTransportError,
 )
 from yanzhang.providers.registry import ProviderRegistry, get_default_registry
+from yanzhang_academic import AcademicRepository, AcademicService
+from yanzhang_core import (
+    ExtensionRegistry,
+    KnowledgeRepository,
+    WorkflowEngine,
+    WritingStorage,
+    YanzhangComposer,
+    create_extension_registry,
+    wire_workflow_step_extensions,
+)
 
 _STATIC_DIR = Path(__file__).with_name("static")
+
+
+class _UnsupportedMediaType(ValueError):
+    """Raised when a legacy JSON endpoint receives a browser-simple body type."""
+
 
 _DEMO_INPUT: dict[str, object] = {
     "document_type": "工作总结",
@@ -106,6 +125,7 @@ def create_app(
     service: GongwenService | None = None,
     artifact_store: ArtifactStore | None = None,
     provider_registry: ProviderRegistry | None = None,
+    extension_registry: ExtensionRegistry | None = None,
 ) -> Starlette:
     """Create the personal web application and its persistence services."""
 
@@ -162,6 +182,37 @@ def create_app(
         probe_provider_fn=lambda provider: probe_provider(provider),
     )
     export_artifacts = artifact_store or ArtifactStore(document_storage.path.parent)
+    yanzhang_storage = WritingStorage(document_storage.path)
+    legacy_migration = yanzhang_storage.migrate_legacy_gongwen()
+    yanzhang_knowledge = KnowledgeRepository(yanzhang_storage)
+    yanzhang_academic_repository = AcademicRepository(yanzhang_storage)
+    yanzhang_academic_service = AcademicService()
+    yanzhang_workflow_engine = WorkflowEngine(yanzhang_storage)
+    yanzhang_extensions = extension_registry or create_extension_registry(discover_plugins=False)
+    extension_discovery = yanzhang_extensions.discover() if extension_registry is None else None
+    recovered_workflows = yanzhang_workflow_engine.recover_interrupted()
+    yanzhang_model_callback = build_model_callback(
+        runtime,
+        registry=resolve_content_registry(),
+    )
+    yanzhang_composer = YanzhangComposer(yanzhang_model_callback)
+    yanzhang_platform = YanzhangPlatformService(
+        yanzhang_storage,
+        knowledge=yanzhang_knowledge,
+        workflow_engine=yanzhang_workflow_engine,
+        composer=yanzhang_composer,
+        academic=yanzhang_academic_service,
+        academic_repository=yanzhang_academic_repository,
+        artifact_store=export_artifacts,
+        routing_preset="balanced" if yanzhang_model_callback is not None else "local_only",
+        runtime=runtime,
+        extension_registry=yanzhang_extensions,
+        extension_discovery=extension_discovery,
+    )
+    extension_workflow_wiring = wire_workflow_step_extensions(
+        yanzhang_extensions,
+        yanzhang_workflow_engine,
+    )
     mcp_context = GongwenMCPContext(
         service=writing_service,
         storage=document_storage,
@@ -170,17 +221,24 @@ def create_app(
         artifact_store=export_artifacts,
         settings=runtime,
         _article_repository=owned_article_repository,
+        yanzhang_platform=yanzhang_platform,
+        _workflow_engine=yanzhang_workflow_engine,
     )
     mcp_server = create_mcp_server(mcp_context, settings=runtime)
     mcp_http = mcp_server.streamable_http_app()
 
+    lifecycle_closed = False
+
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
+        nonlocal lifecycle_closed
         try:
             async with mcp_http.router.lifespan_context(mcp_http):
                 yield
         finally:
-            mcp_context.close()
+            if not lifecycle_closed:
+                lifecycle_closed = True
+                await asyncio.to_thread(mcp_context.close)
 
     routes = [
         Route("/", _homepage, methods=["GET"]),
@@ -207,6 +265,7 @@ def create_app(
         Route("/api/articles/{article_id:str}", _article, methods=["GET", "DELETE"]),
         Route("/api/export/docx", _export_docx, methods=["POST"]),
         Route("/api/export/batch-docx", _export_batch_docx, methods=["POST"]),
+        *v2_routes(),
         *mcp_http.routes,
         Mount("/static", app=StaticFiles(directory=_STATIC_DIR), name="static"),
     ]
@@ -219,6 +278,7 @@ def create_app(
             LiveRequestError: _live_exception,
             DocumentVersionConflict: _version_conflict_exception,
             ProviderError: _provider_exception,
+            _UnsupportedMediaType: _unsupported_media_type_exception,
             json.JSONDecodeError: _json_exception,
             ValueError: _value_exception,
         },
@@ -233,6 +293,19 @@ def create_app(
     application.state.gongwen_artifact_store = export_artifacts
     application.state.gongwen_mcp_context = mcp_context
     application.state.gongwen_mcp_server = mcp_server
+    application.state.yanzhang_storage = yanzhang_storage
+    application.state.yanzhang_knowledge = yanzhang_knowledge
+    application.state.yanzhang_academic_repository = yanzhang_academic_repository
+    application.state.yanzhang_academic_service = yanzhang_academic_service
+    application.state.yanzhang_workflow_engine = yanzhang_workflow_engine
+    application.state.yanzhang_model_callback = yanzhang_model_callback
+    application.state.yanzhang_composer = yanzhang_composer
+    application.state.yanzhang_platform = yanzhang_platform
+    application.state.yanzhang_extension_registry = yanzhang_extensions
+    application.state.yanzhang_extension_discovery = extension_discovery
+    application.state.yanzhang_extension_workflow_wiring = extension_workflow_wiring
+    application.state.yanzhang_legacy_migration = legacy_migration
+    application.state.yanzhang_recovered_workflows = recovered_workflows
     return application
 
 
@@ -544,6 +617,9 @@ async def _request_payload(request: Request) -> dict[str, Any]:
         raise ValueError(f"请求内容超过 {max_request_bytes} 字节上限")
     if not body:
         raise ValueError("请求内容为空")
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+    if content_type != "application/json":
+        raise _UnsupportedMediaType("请求应使用 application/json")
     value = json.loads(body)
     if not isinstance(value, dict):
         raise ValueError("请求内容必须是 JSON 对象")
@@ -643,6 +719,11 @@ async def _json_exception(_: Request, exc: Exception) -> Response:
     return _error_response("invalid_json", "请求不是有效的 JSON", 400)
 
 
+async def _unsupported_media_type_exception(_: Request, exc: Exception) -> Response:
+    del exc
+    return _error_response("unsupported_media_type", "请求应使用 application/json", 415)
+
+
 async def _value_exception(_: Request, exc: Exception) -> Response:
     return _error_response("invalid_request", str(exc), 400)
 
@@ -705,17 +786,27 @@ def main() -> None:
         help="记录 HTTP 访问日志",
     )
     args = parser.parse_args()
+    try:
+        settings.validate_effective_bind_host(args.host)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.reload and args.workers != 1:
         parser.error("--reload 与多工作进程不可同时使用")
     if settings.environment == "production" and args.workers != 1:
         parser.error("个人部署版本的 production 模式固定使用一个工作进程")
+    # The import-string factory is evaluated by Uvicorn (and reload workers)
+    # after argument parsing, so carry the query-free application logger choice
+    # through the canonical environment name.
+    os.environ["YANZHANG_ACCESS_LOG"] = "true" if args.access_log else "false"
     uvicorn.run(
         "gongwen_web.app:create_app",
         host=args.host,
         port=args.port,
         reload=args.reload,
         workers=args.workers,
-        access_log=args.access_log,
+        # RuntimeSettings.access_log enables the application's query-free
+        # access logger. Uvicorn's standard request line includes queries.
+        access_log=False,
         proxy_headers=False,
         server_header=False,
         factory=True,

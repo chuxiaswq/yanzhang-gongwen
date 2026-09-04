@@ -16,11 +16,13 @@ http://127.0.0.1:2019 {
 	respond 404
 }
 
-{$GONGWEN_SITE_ADDRESS} {
+# Compose resolves the legacy {$GONGWEN_PROXY_MAX_REQUEST_SIZE:2MB} setting
+# into the primary YANZHANG_* environment before Caddy starts.
+{$YANZHANG_SITE_ADDRESS} {
 	encode zstd gzip
 
 	request_body {
-		max_size {$GONGWEN_PROXY_MAX_REQUEST_SIZE:2MB}
+		max_size {$YANZHANG_PROXY_MAX_REQUEST_SIZE:2MB}
 	}
 
 	header {

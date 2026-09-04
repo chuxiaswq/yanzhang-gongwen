@@ -35,12 +35,15 @@ ALLOWED_ROOTS = frozenset(
         "tests",
         "uv.lock",
         "yanzhang",
+        "yanzhang_academic",
+        "yanzhang_core",
     }
 )
 IGNORED_ROOTS = frozenset({".git", "dist"})
 FORBIDDEN_PARTS = frozenset(
     {
         ".gongwen-data",
+        ".yanzhang-data",
         ".mypy_cache",
         ".operation.lock",
         ".pytest_cache",
@@ -110,6 +113,7 @@ FORBIDDEN_SUFFIXES = frozenset(
 TEXT_SUFFIXES = frozenset(
     {
         "",
+        ".cjs",
         ".css",
         ".dockerignore",
         ".example",
@@ -178,7 +182,9 @@ SAFE_VALUE_PREFIXES = (
     "EXAMPLE_",
 )
 SDIST_ALLOWED_ROOTS = ALLOWED_ROOTS | {"PKG-INFO"}
-WHEEL_ALLOWED_ROOTS = frozenset({"gongwen_mcp", "gongwen_web", "yanzhang"})
+WHEEL_ALLOWED_ROOTS = frozenset(
+    {"gongwen_mcp", "gongwen_web", "yanzhang", "yanzhang_academic", "yanzhang_core"}
+)
 CONNECTOR_ARCHIVE_PREFIX = "yanzhang-workbuddy-connector-"
 CONNECTOR_ARCHIVE_ROOT = "yanzhang-workbuddy-connector"
 CONNECTOR_MEMBERS = frozenset(

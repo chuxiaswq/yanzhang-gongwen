@@ -57,3 +57,27 @@ def test_main_starts_uvicorn_with_the_application_factory(
         "server_header": False,
         "factory": True,
     }
+
+
+def test_main_rejects_unauthenticated_non_loopback_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_run(application: object, **kwargs: object) -> None:
+        del application, kwargs
+        nonlocal called
+        called = True
+
+    monkeypatch.setenv("GONGWEN_ENV", "test")
+    monkeypatch.delenv("GONGWEN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("YANZHANG_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("GONGWEN_MCP_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("YANZHANG_MCP_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["gongwen-web", "--host", "0.0.0.0"])
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+
+    with pytest.raises(SystemExit, match="2"):
+        main()
+
+    assert called is False

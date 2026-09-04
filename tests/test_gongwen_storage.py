@@ -83,6 +83,17 @@ def test_default_data_dir_prefers_explicit_override(
     assert default_data_dir() == configured
 
 
+def test_default_data_dir_prefers_yanzhang_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy = tmp_path / "legacy"
+    current = tmp_path / "current"
+    monkeypatch.setenv("GONGWEN_DATA_DIR", str(legacy))
+    monkeypatch.setenv("YANZHANG_DATA_DIR", f"  {current}  ")
+
+    assert default_data_dir() == current
+
+
 def test_default_path_uses_configured_data_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

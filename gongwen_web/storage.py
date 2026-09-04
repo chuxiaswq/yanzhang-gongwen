@@ -151,7 +151,9 @@ class DocumentVersionConflict(RuntimeError):
 def default_data_dir() -> Path:
     """Return the configured local data directory without creating it."""
 
-    configured = os.environ.get("GONGWEN_DATA_DIR", "").strip()
+    configured = os.environ.get("YANZHANG_DATA_DIR", "").strip()
+    if not configured:
+        configured = os.environ.get("GONGWEN_DATA_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
     return _platform_default_data_dir(

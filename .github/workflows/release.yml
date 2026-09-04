@@ -48,10 +48,10 @@ jobs:
         run: |
           uv run ruff check --no-cache .
           uv run ruff format --check --no-cache .
-          uv run mypy --cache-dir="${RUNNER_TEMP}/mypy-cache" gongwen_web gongwen_mcp yanzhang
+          uv run mypy --cache-dir="${RUNNER_TEMP}/mypy-cache" gongwen_web gongwen_mcp yanzhang yanzhang_core yanzhang_academic
       - name: Remove generated test bytecode
         run: >-
-          find gongwen_mcp gongwen_web yanzhang tests scripts
+          find gongwen_mcp gongwen_web yanzhang yanzhang_core yanzhang_academic tests scripts
           -type d -name __pycache__ -prune -exec rm -rf {} +
       - name: Build, audit and checksum
         run: |
@@ -66,4 +66,4 @@ jobs:
           gh release create "${GITHUB_REF_NAME}"
           dist/*.whl dist/*.tar.gz dist/*.zip dist/SHA256SUMS
           --verify-tag --prerelease --generate-notes
-          --title "Yanzhang Gongwen ${GITHUB_REF_NAME}"
+          --title "Yanzhang AI Writing Workspace ${GITHUB_REF_NAME}"

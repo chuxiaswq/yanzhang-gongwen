@@ -1,56 +1,307 @@
-# 砚章公文写作 MCP
+# 砚章·AI文字工作台 MCP 契约
 
-砚章把网页中的拟题、正文生成、改写、审校、文章来源库、文稿版本和 Word 导出能力
-统一暴露为 MCP。支持两种使用方式：
+本文是 `v0.2.0-preview.1` 的 MCP 服务契约。服务同时注册：
 
-- **本地 stdio**：MCP 客户端启动 `gongwen-mcp` 子进程，适合个人电脑上的 Codex、
-  TraeCode 等客户端；
-- **远程 Streamable HTTP**：MCP 与 `gongwen-web` 共用同一应用进程和 SQLite 数据，
-  入口为 `https://DOMAIN/mcp`，适合部署服务器上的 WorkBuddy、TraeWork、扣子编程和
-  其他远程 MCP 客户端。
+- 45 个项目化、多场景 `yanzhang_*` 工具；
+- 既有 26 个 `gongwen_*` 公文工具；
+- 既有 6 类 `gongwen://` Resources、11 类项目化 `yanzhang://` Resources 与 4 个公文 Prompt。
 
-网页 API 和 MCP 使用相同的领域服务、模型适配器、资源限制与持久化目录。MCP 不会另建一份
-文章来源或文稿数据库。
+新旧工具使用同一进程、应用服务和 SQLite 数据目录，名字彼此独立，不用 alias 覆盖。v0.2
+新增项目导出及学术实体只读 Resource；既有 Resource 与 Prompt 保持原 URI。Codex 注册和调用
+范式见 [mcp-codex.md](mcp-codex.md)。
 
-## 1. 能力范围
+## 1. 传输、认证与配置
 
-### Tools
+### 本机 stdio
 
-| 分组 | 工具 | 说明 |
+```json
+{
+  "mcpServers": {
+    "yanzhang": {
+      "type": "stdio",
+      "command": "/ABSOLUTE/PATH/TO/VENV/bin/yanzhang-mcp",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "YANZHANG_DATA_DIR": "/ABSOLUTE/PATH/TO/PRIVATE-DATA"
+      }
+    }
+  }
+}
+```
+
+### 远程 Streamable HTTP
+
+```json
+{
+  "mcpServers": {
+    "yanzhang": {
+      "type": "streamableHttp",
+      "url": "https://DOMAIN/mcp",
+      "headers": {
+        "Authorization": "Bearer ${YANZHANG_MCP_ACCESS_TOKEN}"
+      },
+      "timeout": 300000
+    }
+  }
+}
+```
+
+远程入口使用无状态 Streamable HTTP 与 JSON 响应，单次请求体沿用
+`YANZHANG_MAX_REQUEST_BYTES`。Web/API Token 与 MCP Token 分开生成和轮换；工具参数不接受
+Provider API Key、模型 URL 或访问令牌。
+
+首选命令是 `yanzhang-mcp`，兼容命令是 `gongwen-mcp`。`YANZHANG_*` 是首选配置前缀，同名
+后缀的 `GONGWEN_*` 继续读取，二者并存时采用前者。
+
+## 2. 共同类型与边界
+
+所有 `yanzhang_*` 工具使用封闭 JSON Schema，未知字段返回 `invalid_request`。字符串会去除
+首尾空白；列表中不接受空项或重复项。
+
+| 类型 | 允许值 |
+| --- | --- |
+| `scenario_pack_id` | `gongwen`、`workplace`、`media`、`academic` |
+| `channel` | `document`、`email`、`meeting`、`presentation`、`web`、`social`、`academic` |
+| `kind`（资料） | `source`、`style_reference`、`prior_asset`、`terminology`、`note` |
+| `headline_kind` | `title`、`opening`、`section_heading`、`topic_sentence` |
+| `scope` | `all`、`materials`、`assets`、`literature` |
+| `mode`（工作流） | `sync`、`background` |
+| `resume_from` | `research`、`titles`、`outline`、`draft`、`review`、`export` |
+| `status`（资产） | `draft`、`reviewed`、`final`、`archived` |
+| `checks` | `structure`、`style`、`facts`、`citations`、`terminology` |
+| `format`（资产导出） | `docx`、`markdown`、`text`、`html`、`pdf`、`latex`、`csv` |
+| `provider`（文献） | `crossref`、`openalex`、`arxiv` |
+| `format`（文献导入） | `bibtex`、`ris`、`csl-json` |
+| `style`（参考文献） | `gb-t-7714`、`apa`、`mla`、`chicago` |
+
+分页工具的 `limit` 默认 20、范围 1–100，`offset` 默认 0、范围 0–1000000。分块读取的
+`chunk_offset` 默认 0、范围 0–500000；`chunk_size` 默认 8000、范围 500–20000。
+
+### 任务简报公共字段
+
+`yanzhang_generate_titles` 与 `yanzhang_create_workflow` 共享：
+
+| 字段 | 必填/默认 | 限制 |
 | --- | --- | --- |
-| 状态与方法 | `gongwen_get_status` | 查看服务、持久化、模型模式和能力状态 |
-|  | `gongwen_get_methods` | 按文种获取标题公式、正文方法论和默认选项 |
-| 写作 | `gongwen_generate_titles` | 批量拟题、九维评分、排序并返回推荐标题 |
-|  | `gongwen_generate_document` | 按标题、材料与方法论生成正文并自动保存版本 |
-|  | `gongwen_rewrite_text` | 润色、压缩、扩写或按指令改写文本 |
-|  | `gongwen_review_document` | 检查结构、语言、占位符和可读性 |
-|  | `gongwen_audit_document` | 将正文事实主张与用户材料建立证据映射 |
-| 文稿 | `gongwen_save_document` | 新建文稿或按预期版本更新文稿 |
-|  | `gongwen_list_documents` | 分页、检索文稿 |
-|  | `gongwen_read_document` | 读取当前文稿 |
-|  | `gongwen_list_versions` | 读取文稿的不可变版本列表 |
-|  | `gongwen_read_version` | 读取指定历史版本 |
-|  | `gongwen_delete_document` | 删除指定文稿 |
-| 文章 | `gongwen_list_article_sources` | 列出当前可用文章来源 |
-|  | `gongwen_search_articles` | 按关键词、来源和分页条件检索文章元数据 |
-|  | `gongwen_read_article` | 读取一篇文章及正文 |
-|  | `gongwen_get_style_references` | 从指定 `article_ids` 提取结构、标题与表达参考 |
-|  | `gongwen_import_article_text` | 导入用户粘贴且注明来源的文章 |
-|  | `gongwen_import_article_url` | 导入用户指定的文章 URL |
-|  | `gongwen_collect_articles` | 按关键词、来源和日期范围执行有界自动采集 |
-|  | `gongwen_delete_article` | 删除指定文章来源 |
-| 导出 | `gongwen_export_docx` | 生成单篇 DOCX |
-|  | `gongwen_export_documents_zip` | 把多篇文稿打包成 ZIP |
-|  | `gongwen_mail_merge_docx` | 使用 Word 字段模板和数据行批量生成 DOCX |
-| 模型 | `gongwen_test_model` | 测试服务端配置的真实模型 |
-|  | `gongwen_get_model_usage` | 查看模型调用和 Token 用量摘要 |
+| `project_id` | 必填 | 1–128 字符 |
+| `topic` | 必填 | 1–500 字符 |
+| `goal` | 必填 | 1–2000 字符 |
+| `audience` | 必填 | 1–500 字符 |
+| `content_type` | 必填 | 1–100 字符 |
+| `scenario_pack_id` | 必填 | 四个场景包之一 |
+| `recipe_id` | 必填 | 1–100 字符，且属于所选场景包 |
+| `channel` | `document` | 必须属于配方支持的渠道 |
+| `tone` | `准确、清晰、得体` | 1–100 字符 |
+| `length` | `standard` | 1–80 字符 |
+| `target_language` | `zh-CN` | 2–35 字符 |
+| `constraints` | `[]` | 最多 32 项，每项最多 500 字符 |
+| `keywords` | `[]` | 最多 32 项，每项最多 500 字符 |
+| `material_ids` | `[]` | 最多 128 个项目内资料 ID |
+| `model_profile_id` | 空 | 填写时 1–100 字符 |
 
-删除类工具具有持久化副作用，客户端应在用户明确指定目标后调用。
-`gongwen_generate_document` 会自动保存并返回 `id`、`version` 和最多 4000 字的 `preview`；
-生成后通过 `gongwen_read_document` 分块读取全文，不再紧接着调用 `gongwen_save_document`。
-`gongwen_generate_titles`、`gongwen_rewrite_text`、`gongwen_review_document` 和
-`gongwen_audit_document` 不保存内容；手工组合或改写后的完整正文用
-`gongwen_save_document` 建立新版本。
+## 3. 状态与场景包工具
+
+| 工具 | 输入 | 行为 |
+| --- | --- | --- |
+| `yanzhang_get_status` | 无 | 返回通用写作、项目、工作流、学术、导出和模型可用状态，不返回密钥 |
+| `yanzhang_list_scene_packs` | 可选 `channel`、`content_type` 1–100 | 列出匹配的场景包和配方 |
+| `yanzhang_get_scene_pack` | `pack_id` | 返回受众、配方、章节、渠道、输出格式与事实策略 |
+
+四个场景包共 17 个配方：
+
+- `gongwen`：`work-summary`、`briefing-material`、`implementation-plan`、`meeting-minutes`；
+- `workplace`：`work-email`、`weekly-report`、`business-proposal`、`meeting-followup`、
+  `presentation-outline`；
+- `media`：`press-release`、`wechat-article`、`social-post`、`short-video-script`；
+- `academic`：`literature-review`、`research-outline`、`research-abstract`、`reviewer-response`。
+
+## 4. 项目与资料工具
+
+| 工具 | 输入字段与限制 | 副作用 |
+| --- | --- | --- |
+| `yanzhang_create_project` | `name` 1–200；`description` 最多 2000；`scenario_pack_id=gongwen`；`tags` 最多 32 项、单项 100 | 创建项目 |
+| `yanzhang_list_projects` | 可选 `query` 1–200、`scenario_pack_id`；标准分页 | 无 |
+| `yanzhang_get_project` | `project_id` 1–128 | 无 |
+| `yanzhang_upsert_project_term` | `project_id`；`term` / `preferred_form` 1–200；可选 `term_id`、说明和最多 32 个不建议变体 | 新增或更新项目术语规则 |
+| `yanzhang_list_project_terms` | `project_id`；标准分页 | 列出项目术语与首选表达 |
+| `yanzhang_delete_project_term` | `project_id`、`term_id` 1–128 | 删除一条项目术语规则 |
+| `yanzhang_add_material` | `project_id`；`title` 1–500；`content` 1–500000；`kind=source`；`source_url` 最多 2000；`tags` 最多 64 项、单项 100 | 创建知识资料 |
+| `yanzhang_list_materials` | `project_id`；可选 `kind`、最多 32 个标签；标准分页 | 无 |
+| `yanzhang_get_material` | `project_id`、`material_id`；标准分块字段 | 无 |
+| `yanzhang_search` | `project_id`；`query` 1–2000；`scope=all`；最多 32 个标签；标准分页 | 无 |
+
+项目术语会参与 `terminology` 审校：发现不建议变体时指向首选表达。所有术语、资料、搜索范围与
+返回 ID 都受 `project_id` 隔离。长资料使用
+`has_more`/`next_offset` 继续读取，而不是把全文反复放进模型上下文。
+
+## 5. 标题、工作流与资产工具
+
+### 标题
+
+`yanzhang_generate_titles` 使用任务简报公共字段，并增加：
+
+| 字段 | 默认 | 限制 |
+| --- | --- | --- |
+| `count` | `8` | 1–12 |
+| `headline_kind` | `title` | 标题、开头、小标题或段首观点句 |
+| `formula_ids` | `[]` | 最多 20 个唯一公式 ID，每个最多 100 字符 |
+
+工具以项目资料为事实边界生成可比较候选，返回评分与方法信息；它不创建文字资产。
+
+`formula_ids` 是实际筛选条件，并非展示提示。留空时，服务先对当前 `headline_kind` 的完整公式
+目录评分，再截取 `count`；指定后，只对所选公式评分。大标题可选 `main-subtitle`、
+`parallel-triad`、`parallel-quartet`、`antithesis`、`progression`、`numbered-quartet` 等；
+开头、小标题和段首句各自也提供排比、对偶、递进及三段/四段式公式。候选中的
+`formula_name`、`techniques` 和 `rationale` 用于解释结构与排序依据。完整目录与 HTTP 示例见
+[http-api-v2.md](http-api-v2.md#可解释表达公式目录)。
+
+### 工作流
+
+`yanzhang_create_workflow` 使用任务简报公共字段，并增加：
+
+| 字段 | 默认 | 限制 |
+| --- | --- | --- |
+| `auto_review` | `true` | 是否在写作后运行审校步骤 |
+| `requested_exports` | `[]` | 最多 7 个唯一资产导出格式 |
+
+其余工作流工具：
+
+| 工具 | 输入 | 行为 |
+| --- | --- | --- |
+| `yanzhang_run_workflow` | `project_id`、`workflow_id`；`mode=sync`；可选 `resume_from` | 首次运行或校验后从首个未成功步骤恢复；真实模型/来源步骤可能访问网络 |
+| `yanzhang_get_workflow` | `project_id`、`workflow_id` 1–128 | 返回项目内状态、步骤、脱敏错误摘要与输出资产 ID |
+| `yanzhang_cancel_workflow` | `project_id`、`workflow_id` 1–128 | 请求取消项目内尚未完成的工作流 |
+
+首次运行处于 `queued` 时可省略 `resume_from`；显式提供时必须与首个未成功步骤一致。
+`failed`、`waiting_review` 恢复必须提供该步骤值，已经成功的步骤不会被回退。`succeeded`、
+`cancelled` 省略该字段时幂等返回终态，携带该字段时返回状态错误。`background` 对首次运行和合法
+恢复均保持后台执行。运行、查询、取消和恢复都会同时校验 `project_id`；跨项目 ID 与不存在的 ID
+统一按 `not_found` 处理。请求超时前后先用 `yanzhang_get_workflow` 读取状态和步骤，再决定是否
+恢复，以免产生重复资产或导出。工作流只持久化稳定错误码和脱敏摘要，不保存上游异常正文。
+
+### 文字资产
+
+| 工具 | 输入字段与限制 | 行为 |
+| --- | --- | --- |
+| `yanzhang_list_assets` | `project_id`；可选 `status`、`content_type` 1–100；标准分页 | 列出母稿与变体 |
+| `yanzhang_get_asset` | `project_id`、`asset_id`；可选 `revision>=1`；标准分块字段 | 读取当前或指定版本 |
+| `yanzhang_create_variant` | 项目、源资产、`target_channel`；`instruction` 最多 4000；可选 `source_revision>=1`、模型画像；`live=false` | 生成带父资产关系的渠道变体 |
+| `yanzhang_list_revisions` | `project_id`、`asset_id`；标准分页 | 列出不可变版本 |
+| `yanzhang_review_asset` | 项目、资产；`checks` 默认结构/风格/事实/引用，1–5 项；最多 128 个资料 ID；可选模型画像；`live=false` | 只返回并评分所选检查映射到的维度；显式实时模式增加模型审校 |
+| `yanzhang_export_asset` | 项目、资产；`format=docx`；可选 `revision>=1`、`template_id=standard|brief`、`filename` 1–200 | 生成导出工件 |
+
+`target_channel` 使用共同渠道枚举。`yanzhang_review_asset` 中 `structure` 映射逻辑/格式，
+`style` 映射清晰度/语气/语言，`facts` 与 `citations` 映射证据，`terminology` 映射语言；响应同时
+返回 `effective_mode`、`resolved_route`、请求画像和模型问题数。仅 `live=true` 且模型已配置、
+路由允许网络时执行模型增强，本地规则始终先执行。导出返回文件名、媒体类型、大小、哈希、
+`project_id`、`asset_id`、`revision_id`、`creator` 和项目作用域 Resource URI；DOCX 直接保留
+内容块的标题层级，并去除与资产标题重复的标题块。`template_id` 仅用于 DOCX：
+`standard` 是规范文稿样式，`brief` 是紧凑简报样式；其他格式携带该字段会作为参数错误处理。
+
+## 6. 学术与研究写作工具
+
+### 文献检索与导入
+
+| 工具 | 输入字段与限制 | 行为 |
+| --- | --- | --- |
+| `yanzhang_search_literature` | `project_id`、`query` 1–1000；`provider=crossref`；`limit` 1–50，默认 10 | 访问公开元数据服务，并把返回候选保存到当前项目 |
+| `yanzhang_import_literature` | `project_id`；`content` 1–2000000；`format` 为 BibTeX/RIS/CSL-JSON；最多 32 个标签 | 解析并保存记录 |
+| `yanzhang_list_literature` | `project_id`；可选 `query`、摘要开关与标准分页 | 列出项目内已保存文献 |
+| `yanzhang_get_literature` | `project_id`、`record_id` 1–200；`include_abstract=true` | 读取标准化记录和来源追踪 |
+
+导入时，`tags` 会与每条记录已有的 `keywords` 去重合并，并随文献记录持久化；二者合计最多
+100 项。
+
+DOI 只做规范化。文件或手工导入默认不设置 `metadata_verified`；只有公开连接器返回记录可设置该
+标记，作者仍应与原始页面核对。公开元数据响应先核对 `Content-Length`，再分块读取，单次正文
+硬上限为 2 MiB。
+
+### 证据与引用
+
+| 工具 | 输入字段与限制 | 行为 |
+| --- | --- | --- |
+| `yanzhang_list_evidence` | `project_id`；可按 `record_id` 筛选；标准分页 | 列出项目证据片段 |
+| `yanzhang_get_evidence` | `project_id`、`evidence_id` | 读取一条证据及来源谱系 |
+| `yanzhang_extract_evidence` | 项目、文献、`text` 1–500000；`query` 最多 2000；`max_snippets` 1–100，默认 20 | 创建含 `record_id`、来源哈希与位置的证据片段 |
+| `yanzhang_build_literature_matrix` | 项目；1–200 个文献 ID；最多 1000 个证据 ID；`query` 最多 2000 | 构建文献比较矩阵 |
+| `yanzhang_list_literature_matrices` | `project_id`、标准分页 | 列出已保存文献矩阵 |
+| `yanzhang_get_literature_matrix` | `project_id`、`matrix_id` | 读取一个文献矩阵 |
+| `yanzhang_list_research_claims` | `project_id`、标准分页 | 列出核验流程保存的研究主张 |
+| `yanzhang_get_research_claim` | `project_id`、`claim_id` | 读取一条研究主张 |
+| `yanzhang_list_citation_links` | `project_id`；可按主张、文献或证据筛选；标准分页 | 列出引用关系 |
+| `yanzhang_get_citation_link` | `project_id`、`link_id` | 读取一条引用关系 |
+| `yanzhang_verify_citations` | 项目；1–200 个文献 ID；1–1000 个证据 ID；1–500 个 `ResearchClaim`；最多 1000 个链接 | 返回逐项状态与覆盖率 |
+
+核验只使用请求中提供且项目内可见的 `BibliographicRecord` 和 `EvidenceSnippet`。未知文献 ID、
+来源哈希错配、低语义/词汇支撑度分别进入复核或无效状态；哈希匹配不评价作者对原文的解释。
+
+### 研究写作
+
+三个工具 `yanzhang_suggest_academic_titles`、`yanzhang_create_academic_outline` 与
+`yanzhang_draft_abstract` 共享研究简报字段：
+
+| 字段 | 必填/默认 | 限制 |
+| --- | --- | --- |
+| `project_id` | 必填 | 1–128 |
+| `title` | 必填 | 1–500 |
+| `research_question` | 必填 | 1–2000 |
+| `discipline` | 空 | 最多 200 |
+| `purpose` | 空 | 最多 2000 |
+| `audience` | `学术读者` | 1–200 |
+| `document_type` | `研究论文` | 1–100 |
+| `language` | `zh-CN` | 2–20 |
+| `keywords` / `constraints` | `[]` | 各最多 30 项、单项最多 500 |
+| `method_notes` | 空 | 最多 10000 |
+| `record_ids` | `[]` | 最多 1000 个文献 ID |
+
+工具专有字段：
+
+- `yanzhang_suggest_academic_titles`：`count` 默认 5、范围 1–10；
+- `yanzhang_create_academic_outline`：`evidence_ids` 最多 1000；
+- `yanzhang_draft_abstract`：`claims` 最多 500、`links` 最多 1000、`max_characters` 默认 800、
+  范围 100–20000。
+
+其余学术工具：
+
+| 工具 | 输入字段与限制 | 行为 |
+| --- | --- | --- |
+| `yanzhang_format_bibliography` | 项目；1–1000 个文献 ID；`style=gb-t-7714` | 输出基础 GB/T 7714、APA、MLA 或 Chicago 著录 |
+| `yanzhang_review_academic_integrity` | 项目；`manuscript` 1–1000000；文献/证据各最多 1000；主张最多 500；链接最多 1000；可选 `JournalProfile` | 检查缺引、元数据、页码、数字证据、哈希、稿件论断与期刊要求 |
+| `yanzhang_prepare_rebuttal` | 项目；1–200 个 `ReviewComment`；最多 200 个修改映射，值最多 20000 字符 | 生成与实际修改对应的逐条回复 |
+
+基础参考文献格式不宣称覆盖所有期刊变体。研究方法、统计分析、直接引语、页码和核心结论保留
+人工复核节点。完整边界见 [academic-writing.md](academic-writing.md)。
+
+`JournalProfile` 的 `required_sections` 最多 30 项；`title_max_characters` 范围 5–1000，
+`abstract_max_characters` 范围 100–20000，`manuscript_max_words` 范围 500–500000，
+`custom_rules` 最多 50 项。前四类要求由确定性规则对本次 `manuscript` 检查；每条
+`custom_rules` 都返回独立的信息级人工核对项，始终保留人工确认状态。结果附带原始字符数、
+中日韩表意字符/拉丁词组混合计词数和本次期刊画像 ID。
+
+## 7. 兼容 `gongwen_*` 工具
+
+| 分组 | 工具 |
+| --- | --- |
+| 状态与方法 | `gongwen_get_status`、`gongwen_get_methods` |
+| 写作 | `gongwen_generate_titles`、`gongwen_generate_document`、`gongwen_rewrite_text`、`gongwen_review_document`、`gongwen_audit_document` |
+| 文稿 | `gongwen_save_document`、`gongwen_list_documents`、`gongwen_read_document`、`gongwen_list_versions`、`gongwen_read_version`、`gongwen_delete_document` |
+| 文章 | `gongwen_list_article_sources`、`gongwen_search_articles`、`gongwen_read_article`、`gongwen_get_style_references`、`gongwen_import_article_text`、`gongwen_import_article_url`、`gongwen_collect_articles`、`gongwen_delete_article` |
+| 导出 | `gongwen_export_docx`、`gongwen_export_documents_zip`、`gongwen_mail_merge_docx` |
+| 模型 | `gongwen_test_model`、`gongwen_get_model_usage` |
+
+兼容工具继续遵守 v0.1 的关键规则：
+
+- `engine` 取 `auto`、`server` 或 `local`；模型和访问凭据不进入参数；
+- `gongwen_generate_document` 自动保存并返回 `id`、`version` 与最多 4000 字预览；全文通过
+  `gongwen_read_document` 分块读取；
+- 指定新 `document_id` 时使用 `expected_version: 0`，更新时使用最新 `current_version`；
+- 文稿最大 500000 字符，文章最大 2000000 字符，常用分块为 500–20000 字符；
+- `gongwen_collect_articles` 的关键词 1–20 项、来源 1–10 项、`limit` 1–100；
+- `gongwen_get_style_references` 接受 1–8 个文章 ID，只把文章作为结构与表达参考；
+- 删除文稿/文章是持久化副作用；客户端先向用户复述目标 ID 与标题；
+- 导出工件默认 24 小时有效，过期后由原文稿和版本重新生成。
+
+## 8. Resources 与兼容 Prompts
 
 ### Resources
 
@@ -61,222 +312,35 @@
 | `gongwen://documents/{id}` | 当前文稿元数据及前 20000 字正文 |
 | `gongwen://documents/{id}/versions/{version}` | 指定历史版本元数据及前 20000 字正文 |
 | `gongwen://articles/{id}` | 指定文章来源元数据及前 20000 字正文 |
-| `gongwen://exports/{id}` | MCP 生成并登记的 DOCX 或 ZIP 资源 |
-
-导出工具返回 `artifact_id`、`filename`、`mime`、`size`、`sha256`、`resource_uri`、
-`created_at` 和 `expires_at`。客户端通过 `gongwen://exports/{artifact_id}` Resource 读取
-二进制内容。产物默认保存在 `GONGWEN_DATA_DIR/exports`，进程重启后仍可在有效期内读取；它是
-可重建的派生产物，不是文稿事实源。默认有效期为 24 小时，单个 DOCX 上限 16 MiB、单个 ZIP
-上限 64 MiB，目录总量上限 2 GiB；清理顺序为先过期、再最旧。过期后重新执行相应导出工具。
+| `gongwen://exports/{id}` | 仅读取 v0.1 兼容工具生成的未分项目导出工件 |
+| `yanzhang://projects/{project_id}/exports/{artifact_id}` | 校验项目归属后读取 v0.2 资产导出工件 |
+| `yanzhang://projects/{project_id}/academic/literature` | 项目文献记录集合 |
+| `yanzhang://projects/{project_id}/academic/literature/{record_id}` | 一条项目文献记录 |
+| `yanzhang://projects/{project_id}/academic/evidence` | 项目证据片段集合 |
+| `yanzhang://projects/{project_id}/academic/evidence/{evidence_id}` | 一条项目证据片段 |
+| `yanzhang://projects/{project_id}/academic/matrices` | 项目文献矩阵集合 |
+| `yanzhang://projects/{project_id}/academic/matrices/{matrix_id}` | 一个项目文献矩阵 |
+| `yanzhang://projects/{project_id}/academic/claims` | 项目研究主张集合 |
+| `yanzhang://projects/{project_id}/academic/claims/{claim_id}` | 一条项目研究主张 |
+| `yanzhang://projects/{project_id}/academic/citation-links` | 项目引用关系集合 |
+| `yanzhang://projects/{project_id}/academic/citation-links/{link_id}` | 一条项目引用关系 |
 
 ### Prompts
 
-| Prompt | 用途 |
+| Prompt | 作用 |
 | --- | --- |
-| `gongwen_title_workbench` | 先选方法、检索参考，再批量拟题和比较 |
-| `gongwen_draft_from_materials` | 从用户材料到标题、正文、审校和保存的完整流程 |
-| `gongwen_revise_document` | 读取现稿、分段修改、复核并保存新版本 |
-| `gongwen_official_article_research` | 按范围采集权威文章并形成可追溯的写作参考 |
+| `gongwen_title_workbench` | 方法→文章来源→标题比较 |
+| `gongwen_draft_from_materials` | 材料→标题→成文→审校→保存 |
+| `gongwen_revise_document` | 读取→分段修订→复核→新版本 |
+| `gongwen_official_article_research` | 有界采集权威文章并形成可追溯参考 |
 
-Prompt 参数分别为：标题工作台的 `topic`、`document_type=讲话稿`、`audience`；材料成文的
-`topic`、`materials`、`document_type=工作总结`、`requirements`；修订流程的 `document_id`、
-`requirements`；文章来源研究的 `keywords`、`source_ids=gmw,qiushi`、`date_range`。人民网
-自动检索因当前入口使用 HTTP 而默认关闭，仅在部署端显式设置
-`GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH=true` 后按需加入；检索关键词与日期范围会明文传输。
+导出文件是可重建派生产物，不是正文事实源。v0.2 工件只从携带同一 `project_id` 的
+`yanzhang://projects/.../exports/...` 读取；旧 `gongwen://exports/{artifact_id}` 不读取 v0.2
+项目工件。默认单 DOCX 上限 16 MiB、单 ZIP 上限 64 MiB、导出目录总量上限 2 GiB。
 
-### Tool 输入字段与限制
+## 9. WorkBuddy 与国产工具集成
 
-所有 Tool 使用封闭 JSON Schema，未知字段会触发 `invalid_request`。`engine` 只接受
-`auto`、`server`、`local`：`auto` 在服务端模型已配置时使用真实模型，否则使用本地确定性
-引擎；`server` 明确要求服务端模型；`local` 明确使用确定性引擎。客户端不传入 Provider、
-API Key、模型 URL 或访问令牌。
-
-通用写作字段：
-
-| 字段 | 默认值 | 限制 |
-| --- | --- | --- |
-| `document_type` | `工作总结` | 1–100 字符 |
-| `topic` | 必填 | 1–300 字符 |
-| `purpose` | 空 | 最多 2000 字符 |
-| `audience` | 空 | 最多 500 字符 |
-| `materials` | 空 | 字符串或列表；最多 16 项，单项最多 25000 字符，合计最多 50000 字符 |
-| `tone` | `稳健规范` | 最多 100 字符 |
-| `reference_style` | `权威媒体综合写法` | 最多 100 字符 |
-| `style_reference_ids` | 空列表 | 最多 8 个不重复文章 ID，每个最多 128 字符 |
-| `engine` | `auto` | `auto`、`server`、`local` |
-
-`gongwen_generate_titles` 使用上述字段，并增加：`count` 默认 5、范围 1–20；
-`formula_ids` 最多 12 个不重复 ID、每个最多 80 字符；`custom_title_formula` 可为最多
-500 字符的规则，或包含 `name`（最多 100）、`template`（最多 300）、`rule`（最多 500）和
-`style`（最多 80）的对象，其中 `template` 与 `rule` 至少填写一个。该工具不保存结果。
-
-`gongwen_generate_document` 使用通用写作字段，并增加：
-
-| 字段 | 默认值 | 限制或行为 |
-| --- | --- | --- |
-| `requirements` | 空 | 最多 4000 字符 |
-| `fact_lock` | `true` | 布尔值 |
-| `length` | `标准` | 最多 50 字符 |
-| `title_count` | `5` | 1–20 |
-| `title_formula_ids` | 空列表 | 最多 12 个不重复 ID，每个最多 80 字符 |
-| `custom_title_formula` | 空 | 与拟题工具相同 |
-| `selected_title` | 空 | 填写时为 1–300 字符 |
-| `content_methodology_id` | 空 | 填写时为 1–80 字符 |
-| `custom_methodology` | 空 | 自定义正文方法对象，见下文 |
-| `document_id` | 空 | 填写时为 1–128 字符 |
-| `expected_version` | 空 | 非负整数，并与 `document_id` 成对出现 |
-| `version_note` | `MCP 自动生成` | 最多 500 字符 |
-
-`custom_methodology` 包含 `name`（最多 100）、`summary`（最多 500）、`logic`（最多 1000）、
-`steps`（1–16 个不重复步骤，每项最多 200）和 `fact_strategy`（最多 500）。
-
-生成工具会直接建立版本：让服务生成 ID 时同时省略 `document_id` 和 `expected_version`；
-指定全新 ID 时传 `expected_version: 0`；更新现有 ID 时传
-`gongwen_read_document` 返回的 `current_version`。响应包含 `id`、`version`、`title`、
-`document_type`、`preview`、`character_count`、`preview_truncated`、`outline`、
-`title_candidates` 和 `meta`；`preview` 最多 4000 字，全文随后分块读取。
-
-改写与审校：
-
-| 工具 | 输入字段与限制 | 保存行为 |
-| --- | --- | --- |
-| `gongwen_rewrite_text` | `text` 1–100000；`instruction` 最多 2000；`mode` 最多 80；`tone` 最多 100；`engine` | 不保存 |
-| `gongwen_review_document` | `content` 1–200000；`title` 最多 300；`document_type` 最多 100；`materials` 为最多 50000 字符的字符串；`engine`；`compact` 默认 `true`，仅返回前 20 个问题 | 不保存 |
-| `gongwen_audit_document` | `content` 1–30000；`title` 最多 300；`materials` 最多 16 项、单项 25000、合计 50000，且正文与材料合计最多 60000；`compact` 默认 `true`，返回指标和前 100 个问题 | 不保存 |
-
-文稿与版本：
-
-| 工具 | 输入字段与限制 |
-| --- | --- |
-| `gongwen_save_document` | `title` 1–300、`content` 1–500000、`document_type` 最多 100、`version_note` 最多 500；`document_id`/`expected_version` 使用与生成工具相同的成对规则 |
-| `gongwen_list_documents` | `limit` 默认 20、范围 1–100；`offset` 0–1000000；`search` 填写时 1–200 字符 |
-| `gongwen_read_document` | `document_id` 1–128；`chunk_offset` 默认 0、范围 0–500000；`chunk_size` 默认 8000、范围 500–20000 |
-| `gongwen_list_versions` | `document_id` 1–128；`limit` 默认 20、范围 1–100；`offset` 0–1000000 |
-| `gongwen_read_version` | 在文稿分块字段基础上增加 `version`，取值从 1 开始 |
-| `gongwen_delete_document` | `document_id` 1–128 |
-
-`gongwen_save_document` 的 `metadata` 最多 100 个字段，字段名最多 100 字符，单值最多
-100000 个 JSON 字符，整个对象最多 100000 个 JSON 字符。列表响应包含 `has_more`；分块读取的
-`content` 包含 `text`、`offset`、`size`、`total_characters`、`has_more` 和 `next_offset`。
-
-文章来源：
-
-| 工具 | 输入字段与限制 |
-| --- | --- |
-| `gongwen_list_article_sources` | 无 |
-| `gongwen_search_articles` | `query` 最多 200；`source_id` 填写时 1–50；`limit` 默认 20、范围 1–100；`offset` 0–1000000 |
-| `gongwen_read_article` | `article_id` 1–128；`chunk_offset` 默认 0、范围 0–2000000；`chunk_size` 默认 8000、范围 500–20000 |
-| `gongwen_get_style_references` | `article_ids` 必填 1–8 个不重复 ID、每个最多 128；`max_excerpt_chars` 默认 360、范围 80–1000 |
-| `gongwen_import_article_text` | `title` 1–500、`content` 1–2000000、`source_id` 默认 `manual` 且最多 50、`source_name` 默认 `用户导入` 且最多 100、`url` 最多 2000、`published_date` 最多 50、`summary` 最多 500、`style_features` 最多 20 个不重复非空项且每项最多 80 |
-| `gongwen_import_article_url` | `url` 1–2000；可选 `source_id` 1–50；`style_features` 最多 20 个不重复非空项且每项最多 80 |
-| `gongwen_collect_articles` | `keywords` 1–20 项、每项最多 100；`source_ids` 1–10 项、每项最多 50；`start_date`、`end_date` 可选并使用 `YYYY-MM-DD`，开始日期不晚于结束日期；`limit` 默认 20、范围 1–100 |
-| `gongwen_delete_article` | `article_id` 1–128 |
-
-先用搜索结果选定文章 ID，再把这些 ID 交给 `gongwen_get_style_references`。读取文章正文也采用
-与文稿相同的 `has_more`/`next_offset` 分块续读方式。
-
-导出与模型：
-
-| 工具 | 输入字段与限制 |
-| --- | --- |
-| `gongwen_export_docx` | `document_id` 1–128；`version` 可选且从 1 开始；`template_style` 为 `standard` 或 `brief`；`filename` 可选、最多 120 |
-| `gongwen_export_documents_zip` | `documents` 1–50 项；每项使用 `document_id`、可选 `version`、`template_style`、可选 `filename`；ZIP `filename` 默认 `批量公文.zip`、最多 120 |
-| `gongwen_mail_merge_docx` | `document_id`、可选 `version`、`template_style`；`rows` 1–200 行；`filename` 默认 `批量公文.zip`、最多 120 |
-| `gongwen_test_model` | `engine` 默认 `auto`；明确测试真实服务端模型时使用 `server` |
-| `gongwen_get_model_usage` | `limit` 默认 20、范围 1–100；`offset` 0–1000000；返回全局汇总与分页记录 |
-
-邮件合并每行最多 100 个字段，字段名最多 100 字符，单值最多 100000 个 JSON 字符，全部
-`rows` 最多 1000000 个 JSON 字符；批量 ZIP 和邮件合并在展开后的标题、正文、元数据与文件名
-总量上限均为 5000000 字符。
-
-`gongwen_get_status` 和 `gongwen_list_article_sources` 无输入；`gongwen_get_methods` 的
-`document_type` 可省略，填写时为 1–100 字符。
-
-## 2. 本地 stdio
-
-安装项目后，默认入口使用 stdio：
-
-```bash
-cd /ABSOLUTE/PATH/yanzhang-gongwen
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-
-export GONGWEN_DATA_DIR=/ABSOLUTE/PATH/gongwen-data
-gongwen-mcp --transport stdio
-```
-
-本地 MCP 客户端的通用 JSON 配置：
-
-```json
-{
-  "mcpServers": {
-    "gongwen-writing": {
-      "type": "stdio",
-      "command": "/ABSOLUTE/PATH/yanzhang-gongwen/.venv/bin/gongwen-mcp",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "GONGWEN_DATA_DIR": "/ABSOLUTE/PATH/gongwen-data"
-      }
-    }
-  }
-}
-```
-
-stdio 与 Web 进程都把文稿和文章来源写入 `GONGWEN_DATA_DIR/gongwen.sqlite3`，导出产物写入
-`GONGWEN_DATA_DIR/exports`；两种接入方式指向同一持久目录即可共享数据。
-
-真实模型继续使用现有的 `GONGWEN_LLM_*` 服务端配置。长期模型密钥放在操作系统或部署平台的
-secret manager 中，MCP 工具参数只传写作任务内容。真实模型超时最多可配置为 300 秒；客户端
-也应给生成、审校和采集工具保留 300 秒，状态、方法、列表等轻量调用通常更快。
-
-## 3. 远程 Streamable HTTP
-
-生产部署把 MCP 挂载在 Web 应用同一进程的 `/mcp`：
-
-```text
-https://DOMAIN/mcp
-```
-
-在 `deploy/gongwen/.env` 设置一枚独立令牌：
-
-```dotenv
-GONGWEN_MCP_ACCESS_TOKEN=REPLACE_WITH_AN_INDEPENDENT_32_BYTE_RANDOM_TOKEN
-```
-
-然后按现有部署流程重建服务：
-
-```bash
-./deploy/gongwen/start.sh
-./deploy/gongwen/smoke.sh
-```
-
-远程客户端使用：
-
-```json
-{
-  "mcpServers": {
-    "gongwen-writing": {
-      "type": "streamableHttp",
-      "url": "https://DOMAIN/mcp",
-      "headers": {
-        "Authorization": "Bearer REPLACE_WITH_MCP_TOKEN"
-      },
-      "timeout": 300000
-    }
-  }
-}
-```
-
-远程 FastMCP 使用无状态 HTTP 和 JSON 响应，单次请求体沿用 `GONGWEN_MAX_REQUEST_BYTES`；
-部署模板默认 2 MiB。远程入口使用 HTTPS 域名；MCP 令牌至少 32 字节，并与网页访问令牌分开
-生成和轮换。反向代理须保留
-`Authorization`、`Accept`、`Content-Type`、`Mcp-Session-Id`、`MCP-Protocol-Version` 和
-`Last-Event-ID` 请求头，并允许同源的 GET、POST、DELETE 方法。
-
-## 4. WorkBuddy Connector
-
-仓库已经提供符合 WorkBuddy Connector 目录结构的集成包：
+仓库提供可打包的 WorkBuddy Connector：
 
 ```text
 integrations/workbuddy-gongwen/
@@ -287,149 +351,56 @@ integrations/workbuddy-gongwen/
 └── skills/gongwen/SKILL.md
 ```
 
-使用前：
+连接器版本为 `0.2.0-preview.1`，默认服务器名 `yanzhang-writing`，凭据字段
+`YANZHANG_MCP_ACCESS_TOKEN`。把 `DOMAIN` 换成部署域名后导入客户端，先调用
+`yanzhang_get_status`，再验证项目、资料、标题、母稿、变体、审校、学术与导出。
 
-1. 把 `mcp.json` 中的 `DOMAIN` 替换为真实 HTTPS 域名；
-2. 保留 `${GONGWEN_MCP_ACCESS_TOKEN}` 占位符，连接时在 WorkBuddy 表单填写令牌；
-3. 把整个 `workbuddy-gongwen` 目录打包并导入或提交审核；
-4. 先测试 `gongwen_get_status`，再测试拟题、读取和 DOCX 导出流程。
-
-元数据固定为 `source: gongwen-writing`、`type: mcp`、`version: 0.1.0-preview.1`、
-`minWorkbuddyVersion: 4.23.0` 和 `auth_mode: token`。连接器只配置一个
-Streamable HTTP Server，超时为 300000 ms，真实令牌不进入集成文件。轻量查询通常很快；
-五分钟窗口也覆盖真实模型生成、较长审校和有界文章来源采集。
-
-## 5. TraeCode 与 TraeWork
-
-### TraeCode CLI
-
-运行 `traecli config edit`，在 `trae_cli.yaml` 添加：
-
-```yaml
-mcp_servers:
-  - name: gongwen-writing
-    type: http
-    url: https://DOMAIN/mcp
-    timeout: 300s
-    headers:
-      Authorization: "Bearer REPLACE_WITH_MCP_TOKEN"
-```
-
-启动 TraeCode CLI 后输入 `/mcp` 检查连接和工具清单。TraeCode 项目级配置也可放在
-`.trae/mcp.json`：
-
-```json
-{
-  "mcpServers": {
-    "gongwen-writing": {
-      "type": "http",
-      "url": "https://DOMAIN/mcp",
-      "headers": {
-        "Authorization": "Bearer REPLACE_WITH_MCP_TOKEN"
-      },
-      "timeout": "300s"
-    }
-  }
-}
-```
-
-### TraeWork
-
-在 TRAE 企业版控制台进入 **个人设置 → MCP → 创建 → 手动配置**，选择 Streamable HTTP，
-填写 `https://DOMAIN/mcp`，并添加 `Authorization: Bearer REPLACE_WITH_MCP_TOKEN`。
-保存后在 MCP 管理面板启用服务。TraeWork 桌面版云端环境和网页版可使用控制台中已登记的
-MCP Server；服务域名须从相应云端环境可访问。
-
-## 6. 扣子编程
-
-扣子编程提供基于已有 MCP 服务创建自定义插件的入口：
-
-1. 进入目标工作空间的 **资源库**；
-2. 选择 **+资源 → 插件**，类型选择 **MCP**；
-3. 插件 URL 填写 `https://DOMAIN/mcp`；该入口使用 HTTPS 域名而非 IP 地址；
-4. 授权方式选择 **Service → Service token / API key**，位置选择 **Header**，参数名填写
-   `Authorization`，值填写 `Bearer REPLACE_WITH_MCP_TOKEN`；
-5. 保存后同步工具，先试运行 `gongwen_get_status` 与 `gongwen_generate_titles`；
-6. 测试通过后发布插件，供智能体和工作流调用。
-
-## 7. Codex
-
-Codex 的 `~/.codex/config.toml` 或可信项目内 `.codex/config.toml` 可配置远程服务：
-
-```toml
-[mcp_servers.gongwen-writing]
-url = "https://DOMAIN/mcp"
-bearer_token_env_var = "GONGWEN_MCP_ACCESS_TOKEN"
-startup_timeout_sec = 30
-tool_timeout_sec = 300
-```
-
-启动 Codex 前设置令牌：
+从仓库根目录生成可重复的 Connector ZIP：
 
 ```bash
-export GONGWEN_MCP_ACCESS_TOKEN=REPLACE_WITH_MCP_TOKEN
-codex mcp get gongwen-writing
+python scripts/package_connector.py dist
 ```
 
-本地 stdio 配置：
+产物为 `dist/yanzhang-workbuddy-connector-0.2.0-preview.1.zip`。在 WorkBuddy 的 Connector
+管理界面导入后，填写部署端生成的 MCP Token；Token Schema 会将它映射到
+`${YANZHANG_MCP_ACCESS_TOKEN}`，真实值不会写入 ZIP。更新域名或 Skill 后重新打包并导入同版本
+测试实例，确认 71 个工具的目录与实际服务一致，再发布给正式工作区。
 
-```toml
-[mcp_servers.gongwen-writing]
-command = "/ABSOLUTE/PATH/yanzhang-gongwen/.venv/bin/gongwen-mcp"
-args = ["--transport", "stdio"]
-startup_timeout_sec = 30
-tool_timeout_sec = 300
+豆包/扣子、Trae、WorkBuddy 的原生 MCP 配置入口可按同一组参数登记：传输选 Streamable HTTP，
+地址填 `https://DOMAIN/mcp`，认证 Header 填 `Authorization: Bearer MCP_TOKEN`，生成与审校超时
+设为 300 秒。保存后先同步工具并运行只读的 `yanzhang_get_status`；随后依次验证一个临时项目、
+一项资料、一组标题和一份本地模式母稿。客户端若把传输显示为 `http`，以其文档确认该选项实际
+使用 Streamable HTTP 并保留自定义 Header。
 
-[mcp_servers.gongwen-writing.env]
-GONGWEN_DATA_DIR = "/ABSOLUTE/PATH/gongwen-data"
-```
+其他客户端只要支持 Streamable HTTP 与自定义 `Authorization` Header，即可使用第 1 节通用
+配置。部分产品把传输类型显示为 `http` 或“Streamable HTTP”；客户端版本、Header 传递、超时
+和工具数量上限应在真机逐项验证。stdio 客户端使用本机配置，不暴露远程端口。
 
-使用 `codex mcp list` 查看服务，在 Codex 交互界面输入 `/mcp` 查看工具状态。
+## 10. 错误、重试与副作用
 
-## 8. 其他 MCP 客户端
+常见稳定错误类别：
 
-支持 stdio 的客户端使用第 2 节通用 JSON；支持远程 Streamable HTTP 与自定义请求头的客户端
-使用第 3 节配置。不同客户端可能把传输类型写成 `http`、`streamableHttp` 或通过界面选择
-“Streamable HTTP”，以客户端官方字段为准。
+| 类别 | 处理 |
+| --- | --- |
+| `invalid_request` | 按返回字段路径修正类型、枚举、长度或未定义字段 |
+| `not_found` | 核对项目、资料、资产、版本或文献 ID |
+| `operation_timeout` | 查询工作流或资源状态后，从明确步骤恢复 |
+| `internal_error` | 记录时间与错误类别，查看服务端脱敏日志 |
+| HTTP `401/403` | 核对 `/mcp`、MCP Token、Host 与代理配置 |
+| HTTP `413/422` | 分块资料或调整部署请求体上限 |
+| HTTP `429` | 遵循等待时间并缩小并发/查询范围 |
 
-接入检查顺序：
+只读工具可按同一参数重试。创建项目、添加资料、运行工作流、创建变体、导出、外部查询和旧删除
+工具具有副作用；超时后先读取状态或列表，确认结果是否已经落盘。版本更新采用最新版本号，避免
+覆盖其他客户端的新改动。
 
-1. 初始化响应和 `tools/list`；
-2. `gongwen_get_status`；
-3. `gongwen_get_methods` 与 `gongwen_generate_titles`；
-4. `gongwen_generate_document` 自动保存、文稿分块读取和版本读取；
-5. 文章来源检索；
-6. DOCX 导出 Resource；
-7. 令牌错误、参数错误、并发版本冲突、请求大小和频率限制场景。
+## 11. 数据与引用边界
 
-## 9. 豆包相关适配状态
+- 真实模型只接收当前步骤明确选中的任务内容和资料；`ModelProfile` 不保存密钥。
+- 文章来源用于学习结构、标题节奏与表达方法；正文事实仍以用户项目资料和证据链为准。
+- Crossref、OpenAlex、arXiv 查询会发送检索词或文献标识；本地格式导入本身不发起查询。
+- DOI 规范化、`metadata_verified`、来源哈希、语义评分和参考文献排版各自表达不同证据层级。
+- 项目数据、浏览器站点数据、导出、备份和第三方供应商记录应分别管理。
 
-公文 MCP 服务遵循标准 stdio 与 Streamable HTTP 协议，因此可继续对接采用标准 MCP 客户端的
-国产工具。火山引擎已有产品公开了 Streamable HTTP/SSE MCP Server 登记与 Header 鉴权能力；
-豆包消费者端的通用自定义 MCP 配置入口、字段格式和版本覆盖仍以客户端实际界面为准，当前
-列入真机兼容性验证清单，不把它标记为已完成适配。若客户端提供远程 MCP 的 URL 与 Header
-字段，可先用第 3 节参数执行联调。
-
-## 10. 使用边界与排障
-
-- `401/403`：检查是否使用 `GONGWEN_MCP_ACCESS_TOKEN`，并确认请求头包含 `Bearer ` 前缀；
-- `404`：确认路径完整为 `/mcp`，且部署已经更新到包含 MCP 挂载的版本；
-- `409`：文稿发生并发更新，先读取最新版本，再携带新的预期版本保存；
-- `413/422`：根据返回的字段路径和大小说明拆分材料或修正参数；
-- `429`：按响应中的等待时间再次调用；
-- 导出读取异常：重新导出并立即读取返回的 `gongwen://exports/{id}`；
-- 采集耗时：缩小来源、日期、关键词或 `limit`，一次请求维持有界范围。
-
-SQLite 仍按单进程部署约束运行，多个 MCP 客户端共享同一服务实例时使用现有并发版本控制。
-
-## 官方参考
-
-- [Model Context Protocol：Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [WorkBuddy：Connector](https://open.workbuddy.cn/docs/connector)
-- [WorkBuddy：Skill](https://open.workbuddy.cn/docs/skill)
-- [WorkBuddy：MCP 使用指南](https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)
-- [TRAE：TraeCode CLI 模型上下文协议](https://docs.trae.cn/cli_model-context-protocol)
-- [TRAE：企业版模型上下文协议](https://docs.trae.cn/enterprise_model-context-protocol)
-- [扣子编程：基于 MCP 服务创建插件](https://docs.coze.cn/guides_create_a_plugin_based_on_mcp)
-- [OpenAI Codex：MCP](https://developers.openai.com/codex/mcp)
-- [火山引擎：MCP Server 登记示例](https://www.volcengine.com/docs/85637/2477487?lang=zh)
+部署与令牌轮换见 [operations.md](operations.md)，环境变量见
+[configuration.md](configuration.md)，隐私详情见 [../PRIVACY.md](../PRIVACY.md)。

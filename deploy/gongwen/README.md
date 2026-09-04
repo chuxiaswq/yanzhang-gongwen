@@ -142,8 +142,9 @@ Authorization: Bearer MCP_TOKEN
 地址；若要填写自定义基础 URL，需先把完整 HTTPS 地址加入
 `GONGWEN_CLIENT_LLM_BASE_URL_ALLOWLIST` 逗号分隔列表。匹配会校验主机、端口和完整
 路径（末尾斜杠视为等价），而不是只比较域名前缀。页面传入的 `endpoint` 只可使用
-相对路径，因此请求仍会停留在已选基础地址内。该列表只约束页面自带密钥的临时
-连接，不限制由运维人员设置的 `GONGWEN_LLM_BASE_URL`。
+相对路径，因此请求仍会停留在已选基础地址内。生产环境中的服务端
+`GONGWEN_LLM_BASE_URL` 也默认要求 HTTPS；仅当模型监听在本机回环地址时，才可显式设置
+`GONGWEN_ALLOW_INSECURE_LOCAL_MODEL=true` 使用 HTTP，该开关不放行局域网或公网地址。
 
 人民网当前公开自动检索入口使用 HTTP。为避免检索主题和日期范围经明文网络传输，部署样例
 默认设置 `GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH=false`；光明网、求是网自动采集及
@@ -151,8 +152,8 @@ Authorization: Bearer MCP_TOKEN
 默认不勾选人民网，并在提交前显示明文传输提示。服务端拒绝未开启时绕过页面直接提交的
 人民网自动采集请求，错误信息不会带回实际检索条件。
 
-应用访问日志默认关闭，因为标准请求行可能记录文稿搜索词或文章来源查询条件。如需排障，先
-制定日志访问权限、脱敏和短期保留策略，再临时设置 `GONGWEN_ACCESS_LOG=true`；排障结束后
+应用访问日志默认关闭。临时设置 `GONGWEN_ACCESS_LOG=true` 后，应用使用自身的脱敏日志，
+只记录请求方法、路径、状态码和耗时，不记录查询条件、客户端地址、请求头或正文；排障结束后
 恢复为 `false` 并清理相关日志。应用错误响应和模型用量表不保存请求正文或模型密钥。
 
 应用数据位于 `gongwen-web-data` 持久卷。在线创建一致性 SQLite 备份：

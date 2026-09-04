@@ -16,10 +16,11 @@ from mcp.client.stdio import stdio_client
 
 from gongwen_mcp.server import close_server, create_server
 from gongwen_mcp.tools import GongwenMCPContext, build_context
+from gongwen_mcp.writing_server import YANZHANG_TOOL_NAMES
 from gongwen_web.articles import ArticleLibraryError
 from gongwen_web.runtime import RuntimeSettings
 
-TOOL_NAMES = [
+LEGACY_TOOL_NAMES = [
     "gongwen_get_status",
     "gongwen_get_methods",
     "gongwen_generate_titles",
@@ -47,6 +48,7 @@ TOOL_NAMES = [
     "gongwen_test_model",
     "gongwen_get_model_usage",
 ]
+TOOL_NAMES = [*LEGACY_TOOL_NAMES, *YANZHANG_TOOL_NAMES]
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -70,6 +72,9 @@ async def test_server_registers_exact_tools_with_client_safe_schemas(
     tools = await server.list_tools()
 
     assert [tool.name for tool in tools] == TOOL_NAMES
+    assert len(LEGACY_TOOL_NAMES) == 26
+    assert len(YANZHANG_TOOL_NAMES) == 45
+    assert len(tools) == 71
     assert all(tool.name.isascii() and tool.name.replace("_", "").isalnum() for tool in tools)
     assert all(tool.inputSchema["additionalProperties"] is False for tool in tools)
 
@@ -123,6 +128,17 @@ async def test_server_registers_resources_prompts_and_calls_core_tools(
         "gongwen://documents/{id}/versions/{version}",
         "gongwen://articles/{id}",
         "gongwen://exports/{id}",
+        "yanzhang://projects/{project_id}/exports/{artifact_id}",
+        "yanzhang://projects/{project_id}/academic/literature",
+        "yanzhang://projects/{project_id}/academic/literature/{record_id}",
+        "yanzhang://projects/{project_id}/academic/evidence",
+        "yanzhang://projects/{project_id}/academic/evidence/{evidence_id}",
+        "yanzhang://projects/{project_id}/academic/matrices",
+        "yanzhang://projects/{project_id}/academic/matrices/{matrix_id}",
+        "yanzhang://projects/{project_id}/academic/claims",
+        "yanzhang://projects/{project_id}/academic/claims/{claim_id}",
+        "yanzhang://projects/{project_id}/academic/citation-links",
+        "yanzhang://projects/{project_id}/academic/citation-links/{link_id}",
     ]
     assert [item.name for item in prompts] == [
         "gongwen_title_workbench",
@@ -166,8 +182,15 @@ async def test_export_resource_reads_artifact_off_the_event_loop(
 ) -> None:
     caller_thread = threading.current_thread()
 
-    def read(artifact_id: str) -> bytes:
+    def read(
+        artifact_id: str,
+        *,
+        project_id: str | None = None,
+        legacy_only: bool = False,
+    ) -> bytes:
         assert artifact_id == "a" * 32
+        assert project_id is None
+        assert legacy_only is True
         assert threading.current_thread() is not caller_thread
         return b"PK\x03\x04fixture"
 
@@ -176,6 +199,31 @@ async def test_export_resource_reads_artifact_off_the_event_loop(
 
     assert contents[0].content == b"PK\x03\x04fixture"
     assert contents[0].mime_type == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_project_export_resource_enforces_project_identity(
+    mcp_context: GongwenMCPContext,
+) -> None:
+    metadata = mcp_context.artifact_store.put(
+        b"scoped fixture",
+        filename="project.txt",
+        mime="text/plain; charset=utf-8",
+        project_id="project-one",
+        asset_id="asset-one",
+        revision_id="revision-one",
+        creator="yanzhang_export_asset",
+    )
+    server = create_server(mcp_context)
+
+    contents = await server.read_resource(metadata.resource_uri)
+    assert contents[0].content == b"scoped fixture"
+    with pytest.raises(ValueError):
+        await server.read_resource(
+            f"yanzhang://projects/project-two/exports/{metadata.artifact_id}"
+        )
+    with pytest.raises(ValueError):
+        await server.read_resource(f"gongwen://exports/{metadata.artifact_id}")
 
 
 @pytest.mark.asyncio
@@ -194,8 +242,13 @@ async def test_close_server_releases_only_a_lazily_owned_context(tmp_path: Path)
         context_factory=factory,
         settings=RuntimeSettings(environment="test"),
     )
+    assert len(await server.list_tools()) == 71
+    assert created == []
     _, status = await server.call_tool("gongwen_get_status", {})
     assert status["ok"] is True
+    assert len(created) == 1
+    _, yanzhang_status = await server.call_tool("yanzhang_get_status", {})
+    assert yanzhang_status["ok"] is True
     assert len(created) == 1
 
     close_server(server)
@@ -222,9 +275,13 @@ async def test_stdio_entrypoint_initializes_lists_and_calls(tmp_path: Path) -> N
             initialized = await session.initialize()
             listed = await session.list_tools()
             status = await session.call_tool("gongwen_get_status", {})
+            yanzhang_status = await session.call_tool("yanzhang_get_status", {})
 
     assert initialized.protocolVersion == "2025-11-25"
     assert [tool.name for tool in listed.tools] == TOOL_NAMES
     assert status.isError is False
     assert status.structuredContent is not None
     assert status.structuredContent["service"] == "gongwen-mcp"
+    assert yanzhang_status.isError is False
+    assert yanzhang_status.structuredContent is not None
+    assert yanzhang_status.structuredContent["service"] == "yanzhang-platform"

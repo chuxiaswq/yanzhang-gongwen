@@ -9,6 +9,8 @@ import tomllib
 import zipfile
 from pathlib import Path
 
+from gongwen_mcp.writing_server import YANZHANG_TOOL_NAMES
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -16,17 +18,25 @@ def test_distribution_metadata_is_standalone_and_pep639() -> None:
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = configuration["project"]
     assert project["name"] == "yanzhang-gongwen"
-    assert project["version"] == "0.1.0b1"
+    assert project["version"] == "0.2.0b1"
     assert project["license"] == "Apache-2.0"
     assert project["license-files"] == ["LICENSE"]
     assert configuration["build-system"]["requires"] == ["hatchling>=1.27"]
     wheel = configuration["tool"]["hatch"]["build"]["targets"]["wheel"]
-    assert wheel["packages"] == ["gongwen_web", "gongwen_mcp", "yanzhang"]
+    assert wheel["packages"] == [
+        "gongwen_web",
+        "gongwen_mcp",
+        "yanzhang",
+        "yanzhang_core",
+        "yanzhang_academic",
+    ]
     assert set(project["scripts"]) == {
         "gongwen-admin",
         "gongwen-demo",
         "gongwen-mcp",
         "gongwen-web",
+        "yanzhang-mcp",
+        "yanzhang-web",
     }
     direct_names = {
         requirement.split(">", 1)[0].split(";", 1)[0].strip()
@@ -36,7 +46,9 @@ def test_distribution_metadata_is_standalone_and_pep639() -> None:
         "cryptography",
         "httpx",
         "mcp",
+        "pypdf",
         "pydantic",
+        "reportlab",
         "starlette",
         "tzdata",
         "uvicorn",
@@ -79,7 +91,7 @@ def test_docker_context_keeps_build_inputs_and_excludes_private_state() -> None:
 def test_connector_archive_is_deterministic_and_versioned(tmp_path: Path) -> None:
     command = [sys.executable, str(ROOT / "scripts/package_connector.py"), str(tmp_path)]
     subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
-    archive = tmp_path / "yanzhang-workbuddy-connector-0.1.0-preview.1.zip"
+    archive = tmp_path / "yanzhang-workbuddy-connector-0.2.0-preview.1.zip"
     first = archive.read_bytes()
     subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
     assert archive.read_bytes() == first
@@ -94,12 +106,17 @@ def test_connector_archive_is_deterministic_and_versioned(tmp_path: Path) -> Non
     metadata = json.loads(
         (ROOT / "integrations/workbuddy-gongwen/connector-meta.json").read_text(encoding="utf-8")
     )
-    assert metadata["version"] == "0.1.0-preview.1"
+    assert metadata["version"] == "0.2.0-preview.1"
     skill = (ROOT / "integrations/workbuddy-gongwen/skills/gongwen/SKILL.md").read_text(
         encoding="utf-8"
     )
-    assert "version: 0.1.0-preview.1" in skill
+    assert "version: 0.2.0-preview.1" in skill
     assert "author: Yanzhang" in skill
+    allowed_line = next(line for line in skill.splitlines() if line.startswith("allowed-tools:"))
+    allowed = [item.strip() for item in allowed_line.partition(":")[2].split(",")]
+    assert tuple(item for item in allowed if item.startswith("yanzhang_")) == YANZHANG_TOOL_NAMES
+    assert len(allowed) == 71
+    assert len(set(allowed)) == len(allowed)
 
 
 def test_github_workflows_pin_actions_and_audit_every_archive() -> None:

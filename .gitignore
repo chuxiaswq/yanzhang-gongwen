@@ -14,6 +14,7 @@
 
 # Personal writing data, article caches and backups
 .gongwen-data/
+.yanzhang-data/
 deploy/gongwen/.env
 deploy/gongwen/backups/
 deploy/gongwen/.operation.lock/

@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 .gongwen-data
+.yanzhang-data
 .venv
 venv
 **/__pycache__

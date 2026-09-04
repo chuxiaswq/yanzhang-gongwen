@@ -3,7 +3,8 @@
 The defaults intentionally keep the existing loopback development workflow
 working.  Production installations opt into their public host names, reverse
 proxy addresses, CORS origins, and single-user bearer token through
-``GONGWEN_*`` environment variables.
+``YANZHANG_*`` environment variables.  The original ``GONGWEN_*`` names remain
+accepted so existing personal deployments upgrade in place.
 """
 
 # Chinese punctuation is intentional in user-facing configuration errors.
@@ -13,6 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
+import logging
 import math
 import os
 import threading
@@ -37,9 +40,10 @@ EnvironmentName = Literal["development", "test", "production"]
 Clock = Callable[[], float]
 
 _DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost", "testserver", "[::1]")
-_PUBLIC_API_PATHS = frozenset({"/api/health", "/api/ready", "/api/bootstrap"})
+_PUBLIC_API_PATHS = frozenset({"/api/health", "/api/ready", "/api/bootstrap", "/api/v2/bootstrap"})
 _MIN_BODY_BYTES = 1_024
 _MAX_BODY_BYTES = 100 * 1024 * 1024
+_ACCESS_LOGGER = logging.getLogger("yanzhang.access")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,7 @@ class RuntimeSettings:
     rate_limit_window_seconds: int = 60
     hsts_seconds: int = 0
     enable_insecure_people_search: bool = False
+    allow_insecure_local_model: bool = False
     server_provider: ProviderSettings | None = field(default=None, repr=False)
     client_provider_base_url_allowlist: tuple[str, ...] = ()
 
@@ -80,6 +85,7 @@ class RuntimeSettings:
             raise ValueError("GONGWEN_ACCESS_TOKEN 不应为空")
         if self.mcp_access_token is not None and not self.mcp_access_token.strip():
             raise ValueError("GONGWEN_MCP_ACCESS_TOKEN 不应为空")
+        self.validate_effective_bind_host(self.bind_host)
         if self.max_request_bytes < _MIN_BODY_BYTES or self.max_request_bytes > _MAX_BODY_BYTES:
             raise ValueError("GONGWEN_MAX_REQUEST_BYTES 应在 1024 到 104857600 之间")
         if self.rate_limit_requests < 0:
@@ -126,6 +132,12 @@ class RuntimeSettings:
             provider_name = self.server_provider.name.strip().casefold()
             if provider_name not in get_default_registry().list_llm():
                 raise ValueError(f"GONGWEN_LLM_PROVIDER 尚未注册：{provider_name}")
+            if self.server_provider.base_url is not None:
+                _validate_server_provider_base_url(
+                    self.server_provider.base_url,
+                    environment=self.environment,
+                    allow_insecure_local_model=self.allow_insecure_local_model,
+                )
         for base_url in self.client_provider_base_url_allowlist:
             _normalize_client_provider_base_url(base_url, setting=True)
         for origin in self.cors_origins:
@@ -135,7 +147,8 @@ class RuntimeSettings:
     def from_env(cls, environ: Mapping[str, str] | None = None) -> RuntimeSettings:
         """Build settings from an explicit mapping or the current environment."""
 
-        values = os.environ if environ is None else environ
+        raw_values = os.environ if environ is None else environ
+        values = _with_yanzhang_aliases(raw_values)
         environment = _environment(values.get("GONGWEN_ENV", "development"))
         rate_default = 120 if environment == "production" else 0
         # Uvicorn's default access line includes the query string, which may
@@ -180,6 +193,10 @@ class RuntimeSettings:
                 values,
                 "GONGWEN_ENABLE_INSECURE_PEOPLE_SEARCH",
             ),
+            allow_insecure_local_model=_explicit_true_flag(
+                values,
+                "GONGWEN_ALLOW_INSECURE_LOCAL_MODEL",
+            ),
             server_provider=provider,
             client_provider_base_url_allowlist=_csv(
                 values.get("GONGWEN_CLIENT_LLM_BASE_URL_ALLOWLIST")
@@ -191,6 +208,39 @@ class RuntimeSettings:
         """Whether API clients must send the configured bearer token."""
 
         return self.access_token is not None
+
+    def validate_effective_bind_host(self, host: str) -> None:
+        """Fail closed when the effective listener is reachable off-device.
+
+        ``--host`` is applied after environment settings are constructed, so the
+        CLI calls this method again with its final override.  A public Web API may
+        be an explicit operator choice, but the MCP endpoint always retains its
+        independent credential boundary.
+        """
+
+        candidate = host.strip()
+        if not candidate:
+            raise ValueError("GONGWEN_HOST 需要填写监听地址")
+        if _is_loopback_host(candidate):
+            return
+        if self.access_token is None and not self.allow_unauthenticated:
+            raise ValueError(
+                "非回环监听需要配置 GONGWEN_ACCESS_TOKEN；"
+                "公开 Web 服务需显式设置 GONGWEN_ALLOW_UNAUTHENTICATED=true"
+            )
+        if self.access_token is not None and len(self.access_token.encode("utf-8")) < 32:
+            raise ValueError("非回环监听的 GONGWEN_ACCESS_TOKEN 至少需要 32 字节")
+        if self.mcp_access_token is None:
+            raise ValueError("非回环监听需要配置独立的 GONGWEN_MCP_ACCESS_TOKEN")
+        if len(self.mcp_access_token.encode("utf-8")) < 32:
+            raise ValueError("非回环监听的 GONGWEN_MCP_ACCESS_TOKEN 至少需要 32 字节")
+        if self.access_token is not None and hmac.compare_digest(
+            self.access_token.encode("utf-8"),
+            self.mcp_access_token.encode("utf-8"),
+        ):
+            raise ValueError(
+                "非回环监听的 GONGWEN_MCP_ACCESS_TOKEN 需要与 GONGWEN_ACCESS_TOKEN 分开设置"
+            )
 
     @property
     def server_provider_configured(self) -> bool:
@@ -355,6 +405,37 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+class RedactedAccessLogMiddleware:
+    """Log route paths without query strings, bodies, headers, or client identifiers."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = monotonic()
+        status_code = 500
+
+        async def tracked_send(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = int(message["status"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracked_send)
+        finally:
+            _ACCESS_LOGGER.info(
+                "%s %s %d %.3fs",
+                str(scope.get("method", "-")),
+                str(scope.get("path", "/")),
+                status_code,
+                monotonic() - started,
+            )
+
+
 class RequestBodyLimitMiddleware:
     """Reject declared or streamed HTTP request bodies above a byte limit."""
 
@@ -485,6 +566,8 @@ def runtime_middleware(
                 trusted_hosts=list(settings.trusted_proxy_ips),
             )
         )
+    if settings.access_log:
+        middleware.append(Middleware(RedactedAccessLogMiddleware))
     middleware.append(Middleware(SecurityHeadersMiddleware, hsts_seconds=settings.hsts_seconds))
     middleware.append(
         Middleware(
@@ -697,6 +780,20 @@ def _validate_origin(origin: str) -> None:
         raise ValueError("GONGWEN_CORS_ORIGINS 应填写不含路径、参数或用户信息的 Origin")
 
 
+def _is_loopback_host(host: str) -> bool:
+    candidate = host.strip()
+    if candidate.casefold().rstrip(".") == "localhost":
+        return True
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    if "%" in candidate:
+        return False
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
 def _normalize_client_provider_base_url(value: str, *, setting: bool) -> str:
     """Return the exact-comparison form for a browser-owned HTTPS base URL."""
 
@@ -730,6 +827,42 @@ def _normalize_client_provider_base_url(value: str, *, setting: bool) -> str:
     netloc = host if port in {None, 443} else f"{host}:{port}"
     path = parsed.path.rstrip("/")
     return urlunsplit(("https", netloc, path, "", ""))
+
+
+def _validate_server_provider_base_url(
+    value: str,
+    *,
+    environment: EnvironmentName,
+    allow_insecure_local_model: bool,
+) -> None:
+    """Validate the operator-owned model endpoint without weakening local development."""
+
+    label = "GONGWEN_LLM_BASE_URL"
+    candidate = value.strip()
+    if not candidate or any(ord(character) < 32 for character in candidate):
+        raise ValueError(f"{label} 含有无效地址")
+    try:
+        parsed = urlsplit(candidate)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{label} 含有无效地址") from exc
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"{label} 应为不含参数或用户信息的完整 HTTP(S) 基础地址")
+    if environment != "production" or parsed.scheme.casefold() == "https":
+        return
+    if allow_insecure_local_model and _is_loopback_host(parsed.hostname):
+        return
+    raise ValueError(
+        f"production 模式的 {label} 需要使用 HTTPS；"
+        "仅回环本地模型可显式设置 GONGWEN_ALLOW_INSECURE_LOCAL_MODEL=true"
+    )
 
 
 def _is_unsafe_client_provider_endpoint(value: object) -> bool:
@@ -786,11 +919,27 @@ def _server_provider_from_env(values: Mapping[str, str]) -> ProviderSettings | N
     )
 
 
+def _with_yanzhang_aliases(values: Mapping[str, str]) -> Mapping[str, str]:
+    """Map new product-wide names to legacy settings with new-name precedence.
+
+    Keeping one normalized mapping lets validation and operational diagnostics
+    retain their established field names while every deployment knob gains the
+    broader ``YANZHANG_*`` spelling.
+    """
+
+    resolved = dict(values)
+    for name, value in values.items():
+        if name.startswith("YANZHANG_"):
+            resolved[f"GONGWEN_{name.removeprefix('YANZHANG_')}"] = value
+    return resolved
+
+
 __all__ = [
     "BearerTokenMiddleware",
     "InMemoryRateLimiter",
     "RateLimitDecision",
     "RateLimitMiddleware",
+    "RedactedAccessLogMiddleware",
     "RequestBodyLimitMiddleware",
     "RuntimeSettings",
     "SecurityHeadersMiddleware",

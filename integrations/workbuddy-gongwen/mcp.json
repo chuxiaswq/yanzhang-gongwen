@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "gongwen-writing": {
+    "yanzhang-writing": {
       "type": "streamableHttp",
       "url": "https://DOMAIN/mcp",
       "headers": {
-        "Authorization": "Bearer ${GONGWEN_MCP_ACCESS_TOKEN}"
+        "Authorization": "Bearer ${YANZHANG_MCP_ACCESS_TOKEN}"
       },
       "timeout": 300000
     }

@@ -72,6 +72,14 @@ def test_streamable_http_initializes_at_exact_path_and_keeps_tokens_separate(
         storage=GongwenStorage(tmp_path / "gongwen.sqlite3"),
         settings=_settings(),
     )
+    assert (
+        application.state.gongwen_mcp_context.yanzhang_platform
+        is application.state.yanzhang_platform
+    )
+    assert application.state.yanzhang_platform.artifact_store is (
+        application.state.gongwen_artifact_store
+    )
+    assert application.state.yanzhang_platform.runtime is application.state.gongwen_runtime
 
     with TestClient(application) as client:
         assert _initialize(client, token=None).status_code == 401
@@ -86,7 +94,9 @@ def test_streamable_http_initializes_at_exact_path_and_keeps_tokens_separate(
         assert payload["result"]["serverInfo"]["name"] == "砚章公文写作"
 
         tools = _rpc(client, 2, "tools/list", {}).json()["result"]["tools"]
-        assert len(tools) == 26
+        assert len(tools) == 71
+        assert len([tool for tool in tools if tool["name"].startswith("gongwen_")]) == 26
+        assert len([tool for tool in tools if tool["name"].startswith("yanzhang_")]) == 45
         status = _rpc(
             client,
             3,
@@ -96,16 +106,25 @@ def test_streamable_http_initializes_at_exact_path_and_keeps_tokens_separate(
         assert status["isError"] is False
         assert status["structuredContent"]["service"] == "gongwen-mcp"
 
-        resource = _rpc(
+        yanzhang_status = _rpc(
             client,
             4,
+            "tools/call",
+            {"name": "yanzhang_get_status", "arguments": {}},
+        ).json()["result"]
+        assert yanzhang_status["isError"] is False
+        assert yanzhang_status["structuredContent"]["service"] == "yanzhang-platform"
+
+        resource = _rpc(
+            client,
+            5,
             "resources/read",
             {"uri": "gongwen://status"},
         ).json()["result"]
         assert resource["contents"][0]["mimeType"] == "application/json"
         prompt = _rpc(
             client,
-            5,
+            6,
             "prompts/get",
             {"name": "gongwen_title_workbench", "arguments": {"topic": "政绩观"}},
         ).json()["result"]

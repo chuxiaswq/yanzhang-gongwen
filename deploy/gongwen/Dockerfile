@@ -30,13 +30,14 @@ RUN /opt/gongwen-venv/bin/pip install --no-deps --no-build-isolation .
 
 FROM python:3.12-slim-bookworm AS runtime
 
-LABEL org.opencontainers.image.title="Yanzhang Gongwen Web" \
-      org.opencontainers.image.description="Personal official-document writing web service" \
-      org.opencontainers.image.version="0.1.0b1"
+LABEL org.opencontainers.image.title="Yanzhang AI Writing Workspace" \
+      org.opencontainers.image.description="Local-first general writing, research and MCP service" \
+      org.opencontainers.image.version="0.2.0b1"
 
 ENV PATH="/opt/gongwen-venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    YANZHANG_DATA_DIR=/var/lib/gongwen \
     GONGWEN_DATA_DIR=/var/lib/gongwen \
     TZ=Asia/Shanghai
 

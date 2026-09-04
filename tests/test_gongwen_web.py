@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -323,6 +324,29 @@ def test_batch_fields_are_normalized_and_replaced_only_once(client: TestClient) 
         )
 
     assert unique_filename("示例.docx", {"示例.DOCX"}, suffix=".docx") == "示例-2.docx"
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain", "application/x-www-form-urlencoded"])
+def test_legacy_json_endpoints_reject_browser_simple_body_types(
+    client: TestClient,
+    content_type: str | None,
+) -> None:
+    headers = {"Origin": "https://untrusted.example.test"}
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    response = client.post(
+        "/api/generate",
+        content=json.dumps({"topic": "跨站请求不应执行"}).encode(),
+        headers=headers,
+    )
+
+    assert response.status_code == 415
+    assert response.json() == {
+        "error": {
+            "code": "unsupported_media_type",
+            "message": "请求应使用 application/json",
+        }
+    }
 
 
 def test_api_reports_structured_input_errors_and_sanitizes_download_names(

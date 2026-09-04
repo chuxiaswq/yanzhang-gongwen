@@ -11,7 +11,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Protocol, TypeVar, cast, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
@@ -51,6 +51,7 @@ from gongwen_mcp.schemas import (
     TemplateStyle,
     TestModelRequest,
 )
+from gongwen_mcp.writing_tools import YanzhangPlatform
 from gongwen_web.articles import (
     ArticleLibrary,
     ArticleLibraryError,
@@ -65,6 +66,7 @@ from gongwen_web.demo import supported_document_types
 from gongwen_web.docx import build_batch_zip, build_docx, unique_filename
 from gongwen_web.live import LiveRequestError
 from gongwen_web.methodologies import methodology_catalog
+from gongwen_web.model_gateway import build_model_callback
 from gongwen_web.models import BatchExportRequest, ExportDocument
 from gongwen_web.runtime import RuntimeSettings
 from gongwen_web.service import GongwenService
@@ -85,6 +87,11 @@ from yanzhang.providers.errors import (
     ProviderTransportError,
 )
 from yanzhang.providers.registry import ProviderRegistry, get_default_registry
+from yanzhang_academic import AcademicRepository, AcademicService
+from yanzhang_core.composer import YanzhangComposer
+from yanzhang_core.knowledge import KnowledgeRepository
+from yanzhang_core.storage import WritingStorage
+from yanzhang_core.workflow import WorkflowEngine
 
 _DATABASE_FILENAME = "gongwen.sqlite3"
 _GENERATION_PREVIEW_CHARS = 4_000
@@ -100,6 +107,11 @@ _PATH_PATTERN = re.compile(
 )
 
 T = TypeVar("T")
+
+
+@runtime_checkable
+class _ClosableYanzhangPlatform(Protocol):
+    def close(self, *, wait: bool = True) -> None: ...
 
 
 class GongwenToolError(RuntimeError):
@@ -122,12 +134,20 @@ class GongwenMCPContext:
     artifact_store: ArtifactStore
     settings: RuntimeSettings
     _article_repository: SQLiteArticleRepository | None = field(default=None, repr=False)
+    yanzhang_platform: YanzhangPlatform | None = field(default=None, repr=False)
+    _workflow_engine: WorkflowEngine | None = field(default=None, repr=False)
 
     def close(self) -> None:
-        """Release the article connection owned by :func:`build_context`."""
+        """Release background workers and repositories owned by the context."""
 
-        if self._article_repository is not None:
-            self._article_repository.close()
+        try:
+            if self._workflow_engine is not None:
+                self._workflow_engine.close()
+            elif isinstance(self.yanzhang_platform, _ClosableYanzhangPlatform):
+                self.yanzhang_platform.close()
+        finally:
+            if self._article_repository is not None:
+                self._article_repository.close()
 
 
 def build_context(
@@ -144,9 +164,14 @@ def build_context(
     root = Path(data_dir).expanduser() if data_dir is not None else default_data_dir()
     storage = GongwenStorage(root / _DATABASE_FILENAME)
     article_repository = SQLiteArticleRepository(storage.path)
+    workflow_engine: WorkflowEngine | None = None
     try:
         registry = provider_registry
-        if article_discovery is None or article_fetcher is None:
+        if (
+            article_discovery is None
+            or article_fetcher is None
+            or runtime.server_provider_configured
+        ):
             registry = registry or get_default_registry()
         if article_discovery is None:
             discovery = cast(ProviderRegistry, registry).create_article_discovery(
@@ -164,16 +189,44 @@ def build_context(
             article_library,
             discovery,
         )
+        artifact_store = ArtifactStore(root)
+        writing_storage = WritingStorage(storage.path)
+        knowledge = KnowledgeRepository(writing_storage)
+        academic_repository = AcademicRepository(writing_storage)
+        workflow_engine = WorkflowEngine(writing_storage)
+        model_callback = build_model_callback(runtime, registry=registry)
+        composer = YanzhangComposer(model_callback)
+
+        # Keep this import at the composition boundary.  The concrete service
+        # implements the transport-neutral Protocol imported above; MCP remains
+        # independent from its implementation details.
+        from gongwen_web.writing_service import YanzhangPlatformService
+
+        yanzhang_platform = YanzhangPlatformService(
+            writing_storage,
+            knowledge=knowledge,
+            workflow_engine=workflow_engine,
+            composer=composer,
+            academic=AcademicService(),
+            academic_repository=academic_repository,
+            artifact_store=artifact_store,
+            routing_preset="balanced" if model_callback is not None else "local_only",
+            runtime=runtime,
+        )
         return GongwenMCPContext(
             service=GongwenService(storage, runtime),
             storage=storage,
             article_library=article_library,
             article_collection=article_collection,
-            artifact_store=ArtifactStore(root),
+            artifact_store=artifact_store,
             settings=runtime,
             _article_repository=article_repository,
+            yanzhang_platform=yanzhang_platform,
+            _workflow_engine=workflow_engine,
         )
     except BaseException:
+        if workflow_engine is not None:
+            workflow_engine.close(wait=False)
         article_repository.close()
         raise
 
@@ -524,6 +577,7 @@ class GongwenTools:
                 content,
                 filename=filename,
                 mime=DOCX_MIME,
+                creator="gongwen_export_docx",
             )
             return _model_dict(metadata)
 
@@ -542,6 +596,7 @@ class GongwenTools:
                 content,
                 filename=filename,
                 mime=ZIP_MIME,
+                creator="gongwen_export_documents_zip",
             )
             result = _model_dict(metadata)
             result["files"] = names
@@ -570,6 +625,7 @@ class GongwenTools:
                 content,
                 filename=filename,
                 mime=ZIP_MIME,
+                creator="gongwen_mail_merge_docx",
             )
             result = _model_dict(metadata)
             result["files"] = names
