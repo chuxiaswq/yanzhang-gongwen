@@ -116,7 +116,8 @@ def test_github_workflows_pin_actions_and_audit_every_archive() -> None:
         assert "scripts/package_connector.py dist" in workflow
         assert "scripts/write_checksums.py dist" in workflow
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in workflow
-        assert "UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/yanzhang-venv" in workflow
+        assert "UV_PROJECT_ENVIRONMENT=%s/yanzhang-venv" in workflow
+        assert '"$RUNNER_TEMP" >> "$GITHUB_ENV"' in workflow
         assert "pytest -p no:cacheprovider" in workflow
         assert "ruff check --no-cache" in workflow
         assert "ruff format --check --no-cache" in workflow
