@@ -68,6 +68,9 @@ def test_runtime_settings_parse_production_environment_without_exposing_secrets(
         "server_provider_configured": True,
         "provider_name": "openai",
         "default_model": "fixture-model",
+        "default_mode": "demo",
+        "demo_engine": "deterministic",
+        "demo_uses_model": False,
     }
     assert secret not in repr(settings)
     assert mcp_secret not in repr(settings)
@@ -729,6 +732,9 @@ def test_live_request_can_use_server_provider_without_browser_secret(
         "server_provider_configured": True,
         "provider_name": "openai",
         "default_model": "server-default-model",
+        "default_mode": "demo",
+        "demo_engine": "deterministic",
+        "demo_uses_model": False,
     }
     assert "server-model-secret" not in json.dumps(bootstrap)
     assert len(captured) == 2

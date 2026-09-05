@@ -1,5 +1,5 @@
 /*
- * 砚章 · 公文写作工作台
+ * 砚章 · 场景化文字工作台
  * Warm paper, restrained cinnabar and ink-grey form the visual language.
  */
 
@@ -6359,4 +6359,932 @@ body.focus-mode .paper {
   .variant-studio { display: none !important; }
   .route-stage,
   #projectsPage { display: block !important; width: auto !important; height: auto !important; overflow: visible !important; }
+}
+
+/* Workspace clarity: visible execution mode and compact, complete navigation. */
+#documentType:disabled {
+  color: var(--ink-700);
+  background-color: #f3f0e9;
+  opacity: 1;
+}
+
+.app-shell,
+.app-shell.focus-mode,
+.app-shell.is-focus-mode,
+body.focus-mode .app-shell {
+  grid-template-rows: auto minmax(0, 1fr) 29px;
+}
+
+.topbar {
+  grid-template-rows: 63px 45px auto;
+}
+
+.engine-banner {
+  display: flex;
+  grid-column: 1 / -1;
+  grid-row: 3;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+  margin: 0 -18px;
+  padding: 8px 18px;
+  color: var(--ink-800);
+  background: #f5efe4;
+  border-top: 1px solid #e5d7c1;
+}
+
+.engine-banner-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.engine-banner-title {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.engine-banner-detail {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.engine-banner-action,
+.service-retry-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 11px;
+  color: var(--red-800);
+  background: var(--surface);
+  border: 1px solid #d8c6ad;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.engine-banner-action:hover,
+.service-retry-button:hover {
+  background: var(--red-50);
+  border-color: #c5a89e;
+}
+
+.engine-banner[data-mode="live"] {
+  background: var(--green-soft);
+  border-top-color: #cfdfd2;
+}
+
+.engine-banner[data-mode="offline"],
+.engine-banner[data-mode="error"] {
+  background: var(--amber-soft);
+  border-top-color: #e8d1a5;
+}
+
+.engine-explanation {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 12px 13px;
+  color: var(--ink-700);
+  background: #f6f1e7;
+  border: 1px solid #e3d7c2;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.engine-explanation p {
+  margin: 0;
+}
+
+.engine-explanation strong {
+  color: var(--ink-900);
+}
+
+.document-execution {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--ink-600);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.engine-tag {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 3px 7px;
+  color: #71572c;
+  background: var(--gold-soft);
+  border: 1px solid #e1d2b5;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.engine-tag[data-mode="live"] {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: #c6dece;
+}
+
+.project-workflow-status,
+.brief-actions > span,
+.knowledge-result-item,
+.academic-record,
+.reference-picker,
+.expression-result-card,
+.variant-result-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1081px) {
+  .app-shell.focus-mode .topbar,
+  .app-shell.is-focus-mode .topbar,
+  body.focus-mode .topbar {
+    grid-template-rows: 49px 0 auto;
+  }
+}
+
+@media (max-width: 1080px) {
+  .app-shell,
+  .app-shell.focus-mode,
+  .app-shell.is-focus-mode,
+  body.focus-mode .app-shell {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .topbar,
+  .app-shell.focus-mode .topbar,
+  .app-shell.is-focus-mode .topbar,
+  body.focus-mode .topbar {
+    grid-template-rows: 56px 48px auto;
+    min-height: 0;
+  }
+
+  .suite-nav {
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-padding-inline: 12px;
+    scrollbar-color: #b5a69a #f4eee6;
+    scrollbar-width: thin;
+  }
+
+  .suite-nav::-webkit-scrollbar {
+    display: block;
+    height: 4px;
+  }
+
+  .suite-nav::-webkit-scrollbar-thumb {
+    background: #b5a69a;
+    border-radius: 4px;
+  }
+
+  .engine-banner {
+    margin: 0 -12px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar,
+  .app-shell.focus-mode .topbar,
+  .app-shell.is-focus-mode .topbar,
+  body.focus-mode .topbar {
+    grid-template-rows: 44px auto auto;
+    padding: 0 10px;
+  }
+
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+  }
+
+  .brand-copy small {
+    display: none;
+  }
+
+  /* All eight destinations remain visible; the project chooser owns its row. */
+  .suite-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: 36px 36px 38px;
+    gap: 0;
+    margin: 0 -10px;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .suite-nav::before {
+    display: none;
+  }
+
+  .suite-nav-item {
+    min-width: 0;
+    min-height: 36px;
+    gap: 5px;
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  .suite-nav-item svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+  }
+
+  .suite-nav-item::after {
+    right: 16px;
+    left: 16px;
+  }
+
+  .project-switcher {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    order: 0;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 38px;
+    gap: 7px;
+    margin: 0;
+    padding: 3px 10px;
+    background: var(--surface);
+    border: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .project-switcher-label {
+    display: inline;
+    flex: 0 0 auto;
+    font-size: 11px;
+  }
+
+  .project-switcher select {
+    flex: 1 1 0;
+    width: 100%;
+    max-width: 100%;
+    height: 32px;
+    padding-left: 8px;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .project-switcher-button {
+    width: 32px;
+    height: 32px;
+    font-size: 17px;
+  }
+
+  .engine-banner {
+    gap: 8px;
+    margin: 0 -10px;
+    padding: 7px 10px;
+  }
+
+  .engine-banner-title {
+    font-size: 12px;
+  }
+
+  .engine-banner-detail {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .engine-banner-action {
+    max-width: 84px;
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  .project-page {
+    grid-template-rows: 40px minmax(0, 1fr);
+  }
+
+  .mobile-tab {
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .input-panel,
+  .review-panel {
+    padding-top: 14px;
+  }
+
+  .universal-brief > summary,
+  .variant-studio > summary {
+    padding: 11px 12px;
+  }
+
+  .universal-brief > summary b,
+  .variant-studio > summary b {
+    font-size: 14px;
+  }
+
+  .universal-brief > summary small,
+  .universal-brief > summary em,
+  .variant-studio > summary small,
+  .variant-studio > summary em {
+    font-size: 11px;
+  }
+
+  .brief-fields {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .brief-fields .form-row.split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .field,
+  .compact-field {
+    font-size: 13px;
+  }
+
+  .field input,
+  .field select,
+  .field textarea {
+    font-size: 16px;
+  }
+
+  .field input,
+  .field select {
+    height: 42px;
+  }
+
+  .field select {
+    background-position: calc(100% - 15px) 19px, calc(100% - 11px) 19px;
+  }
+
+  .field .field-note,
+  .field-note,
+  .brief-context-note p,
+  .brief-actions > span,
+  .project-workflow-status,
+  .methodology-description,
+  .reference-picker > p,
+  .optional-label {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .brief-context-note span {
+    font-size: 11px;
+  }
+
+  .brief-action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .brief-action-buttons .mini-button,
+  .brief-action-buttons .primary-button.compact {
+    min-height: 40px;
+    padding: 7px 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: normal;
+  }
+
+  .fact-values span,
+  .fact-group-heading,
+  .academic-module > p,
+  .academic-record strong,
+  .academic-record small,
+  .academic-records.is-empty,
+  .evidence-snippet p,
+  .claim-link > p,
+  .claim-link > small,
+  .citation-module ol,
+  .academic-outline > ol p,
+  .academic-outline > ol small,
+  .academic-integrity-note p {
+    font-size: 12px;
+  }
+
+  .expression-result-card p,
+  .variant-result-card > p,
+  .knowledge-result-item p {
+    font-size: 13px;
+  }
+
+  .academic-table {
+    font-size: 12px;
+  }
+
+  .document-execution,
+  .engine-tag {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 360px) {
+  .suite-nav-item {
+    gap: 3px;
+    font-size: 11px;
+  }
+
+  .suite-nav-item svg {
+    display: none;
+  }
+
+  .brief-fields .form-row.split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .universal-brief > summary small {
+    font-size: 10px;
+  }
+}
+
+@media print {
+  .engine-banner,
+  .document-execution,
+  .engine-tag,
+  .service-retry-button {
+    display: none !important;
+  }
+}
+
+/* Scenario workspace: one context drives writing, references and review. */
+.input-panel {
+  --scene-accent: #8c3435;
+  --scene-soft: #faf0ed;
+  --scene-line: #e7ceca;
+}
+
+.input-panel:has(.scenario-overview[data-scenario="workplace"]) {
+  --scene-accent: #326581;
+  --scene-soft: #edf5f9;
+  --scene-line: #cbdfe9;
+}
+
+.input-panel:has(.scenario-overview[data-scenario="media"]) {
+  --scene-accent: #936125;
+  --scene-soft: #fcf4e7;
+  --scene-line: #ead7b7;
+}
+
+.input-panel:has(.scenario-overview[data-scenario="academic"]) {
+  --scene-accent: #586386;
+  --scene-soft: #f0f2f9;
+  --scene-line: #d5daed;
+}
+
+.scenario-overview {
+  width: min(700px, 100%);
+  margin: -3px auto 18px;
+  padding: 14px;
+  color: var(--ink-800);
+  background: var(--scene-soft);
+  border: 1px solid var(--scene-line);
+  border-top: 3px solid var(--scene-accent);
+  border-radius: 10px;
+}
+
+.scenario-overview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.scenario-overview-heading .eyebrow {
+  color: var(--scene-accent);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.scenario-linkage-badge {
+  padding: 2px 6px;
+  color: var(--scene-accent);
+  border: 1px solid var(--scene-line);
+  border-radius: 4px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.scenario-select-field {
+  gap: 5px;
+  margin: 0 0 10px;
+}
+
+.scenario-select-field > span {
+  font-size: 10px;
+}
+
+.scenario-select-field select {
+  height: 42px;
+  color: var(--scene-accent);
+  background-color: var(--surface);
+  border-color: var(--scene-line);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scenario-overview-copy h3 {
+  margin: 0 0 5px;
+  font-size: 12px;
+}
+
+.scenario-overview-copy p {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.scenario-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.scenario-capabilities > span {
+  min-width: 0;
+  padding: 3px 6px;
+  color: var(--scene-accent);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* Keep the core brief flat; optional settings do not crowd the first screen. */
+.universal-brief {
+  width: min(700px, 100%);
+  margin: 0 auto 18px;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.universal-brief > summary {
+  padding: 0 0 11px;
+}
+
+.universal-brief > summary i {
+  width: 28px;
+  height: 28px;
+  color: var(--scene-accent);
+  background: var(--scene-soft);
+  border-color: var(--scene-line);
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 10px;
+}
+
+.universal-brief > summary small {
+  font-size: 10px;
+}
+
+.universal-brief .brief-fields {
+  padding: 0 0 16px;
+  border-top: 0;
+}
+
+.brief-context-note {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.brief-context-note p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.brief-advanced {
+  padding: 9px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.brief-advanced > summary {
+  color: var(--ink-600);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.brief-advanced > summary > span {
+  margin-left: 4px;
+  color: var(--ink-500);
+  font-size: 10px;
+}
+
+.brief-advanced-fields {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.expression-method-field {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--scene-soft);
+  border: 1px solid var(--scene-line);
+  border-radius: 8px;
+}
+
+.expression-method-field > span {
+  color: var(--scene-accent);
+}
+
+.expression-method-field select {
+  background-color: var(--surface);
+  border-color: var(--scene-line);
+}
+
+.expression-method-field .field-note {
+  margin-top: 3px;
+  color: var(--ink-600);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.methodology-description {
+  padding-left: 10px;
+  border-left: 2px solid var(--scene-line);
+}
+
+#toneSelector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#toneSelector > label {
+  flex: 1 1 76px;
+  min-width: 0;
+}
+
+#toneSelector > label > span {
+  min-height: 33px;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.scene-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.scene-reference-action {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 110px;
+  gap: 4px;
+  padding: 6px 8px;
+  color: var(--scene-accent);
+  background: var(--surface);
+  border: 1px solid var(--scene-line);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.scene-reference-action:hover {
+  background: var(--scene-soft);
+}
+
+.reference-picker > .scene-evidence-note {
+  padding: 9px 10px;
+  color: var(--scene-accent);
+  background: var(--scene-soft);
+  border-left: 2px solid var(--scene-accent);
+  font-size: 11px;
+}
+
+.scene-reference-action[hidden],
+.scene-evidence-note[hidden] {
+  display: none;
+}
+
+.checklist label > span {
+  min-width: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.scenario-select-field select:focus-visible,
+.scene-reference-action:focus-visible,
+.brief-advanced > summary:focus-visible {
+  outline: 2px solid var(--scene-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+  .scenario-overview {
+    margin-bottom: 16px;
+    padding: 12px;
+  }
+
+  .scenario-select-field select {
+    height: 44px;
+    font-size: 16px;
+  }
+
+  .scenario-overview-heading .eyebrow,
+  .scenario-linkage-badge,
+  .scenario-capabilities > span {
+    font-size: 11px;
+  }
+
+  .scenario-overview-copy h3 {
+    font-size: 13px;
+  }
+
+  .scenario-overview-copy p,
+  .brief-context-note p,
+  .brief-advanced > summary,
+  .expression-method-field .field-note,
+  .reference-picker > .scene-evidence-note {
+    font-size: 12px;
+  }
+
+  .universal-brief > summary {
+    padding: 0 0 11px;
+  }
+
+  .universal-brief .brief-fields {
+    padding: 0 0 16px;
+  }
+
+  .scene-reference-action {
+    min-height: 40px;
+    font-size: 12px;
+  }
+
+  #toneSelector > label > span {
+    min-height: 40px;
+  }
+}
+
+@media print {
+  .scenario-overview,
+  .scene-reference-actions,
+  .scene-evidence-note {
+    display: none !important;
+  }
+}
+
+/* Scene typography is a drafting aid, not a journal submission template. */
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"], [data-scenario="academic"]) .paper::before {
+  display: none;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-title {
+  font-family: var(--sans);
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.app-shell[data-scenario="workplace"] .paper-title {
+  min-height: 64px;
+  font-size: 23px;
+  line-height: 1.5;
+}
+
+.app-shell[data-scenario="media"] .paper-title {
+  font-size: 28px;
+  line-height: 1.4;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body {
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.85;
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body p {
+  margin-bottom: 0.9em;
+  text-indent: 0;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body :is(h1, h2, h3, h4) {
+  font-family: var(--sans);
+  line-height: 1.5;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body h1 {
+  font-size: 1.35em;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body h2 {
+  font-size: 1.18em;
+}
+
+.app-shell:is([data-scenario="workplace"], [data-scenario="media"]) .paper-body h3 {
+  font-size: 1.06em;
+}
+
+.app-shell[data-scenario="academic"] .paper-title {
+  font-family: "Times New Roman", var(--serif);
+  font-size: 24px;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.app-shell[data-scenario="academic"] .paper-body {
+  font-family: "Times New Roman", var(--serif);
+  font-size: 16px;
+  line-height: 1.85;
+  letter-spacing: 0;
+}
+
+.app-shell[data-scenario="academic"] .paper-body :is(h1, h2, h3, h4) {
+  font-family: "Times New Roman", var(--serif);
+  line-height: 1.5;
+}
+
+.app-shell[data-scenario="academic"] .paper-body h1 {
+  font-size: 1.3em;
+}
+
+.app-shell[data-scenario="academic"] .paper-body h2 {
+  font-size: 1.15em;
+}
+
+.app-shell[data-scenario="academic"] .paper-body h3 {
+  font-size: 1.05em;
+}
+
+.recipe-catalog-loading {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 24px;
+  color: var(--ink-600);
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.source-gateway-card.is-primary {
+  background: var(--blue-soft);
+  border-color: #cbdfe9;
+}
+
+.source-gateway-card.is-primary > i {
+  color: var(--blue);
+  background: var(--surface);
+}
+
+@media (max-width: 760px) {
+  .app-shell:is([data-scenario="workplace"], [data-scenario="media"], [data-scenario="academic"]) .paper-title {
+    font-size: clamp(21px, 5vw, 25px);
+  }
+}
+
+@media print {
+  .app-shell:is([data-scenario="workplace"], [data-scenario="media"], [data-scenario="academic"]) .paper-title {
+    min-height: 0;
+    font-size: 18pt;
+  }
+
+  .app-shell:is([data-scenario="workplace"], [data-scenario="media"], [data-scenario="academic"]) .paper-body {
+    font-size: 12pt;
+    line-height: 1.75;
+  }
 }

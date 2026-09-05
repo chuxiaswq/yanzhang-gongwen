@@ -14,6 +14,10 @@ from yanzhang_core.models import CoreModel, ModelProfile, ModelTier
 type RoutingPresetName = Literal["economy", "balanced", "quality", "local_only"]
 
 
+class ModelExecutionConfigurationError(ValueError):
+    """An explicit model request has no usable configured execution path."""
+
+
 class RoutingPreset(CoreModel):
     """A stable policy describing tier preference and network constraints."""
 

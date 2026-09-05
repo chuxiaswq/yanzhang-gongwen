@@ -12,6 +12,7 @@ from pydantic import Field, field_validator, model_validator
 
 from yanzhang_core.models import CoreModel, WritingBrief
 from yanzhang_core.packs import HeadlineKind
+from yanzhang_core.scenario_profiles import get_scenario_profile
 
 _NUMBER = re.compile(r"\d[\d,.]*(?:%|％)?")
 _UNKNOWN_SLOT = re.compile(r"\{[^{}]+\}")
@@ -556,6 +557,193 @@ _FORMULAS: dict[HeadlineKind, tuple[HeadlineFormula, ...]] = {
 }
 
 
+# Formula identifiers remain stable across clients; the actual templates and
+# explanations belong to the selected scenario, not to a universal official style.
+_SCENE_TEMPLATES: dict[str, dict[HeadlineKind, tuple[tuple[str, str], ...]]] = {
+    "workplace": {
+        "title": (
+            ("事项直述", "{topic}"),
+            ("目的前置", "{topic}：{goal}"),
+            ("结论与说明", "{focus}的现状与选择——{topic}"),
+            ("三项重点", "进展、风险与下一步——{topic}"),
+            ("四项信息", "目标、进度、依赖、交付——{topic}"),
+            ("现状与选择", "从当前情况到下一步选择——{topic}"),
+            ("问题到方案", "从{focus}到解决方案：{topic}"),
+            ("四项议程", "一看进展、二查风险、三明依赖、四定安排——{topic}"),
+            ("请求确认", "请确认：{topic}的下一步安排"),
+            ("决策问题", "{topic}：需要作出什么选择"),
+            ("收件对象", "发给{audience}：{topic}"),
+            ("交付类型", "{topic}｜{content_type}"),
+            ("快速同步", "{focus}进展同步"),
+        ),
+        "opening": (
+            ("目的直述", "围绕{topic}，本次沟通希望{goal}。"),
+            ("三项速览", "关于{topic}，先同步进展，再说明风险，最后确认下一步。"),
+            ("四项速览", "{topic}的沟通包括四项：目标、当前进展、协作依赖与待确认事项。"),
+            ("状态与需求", "关于{topic}，既说明目前的情况，也明确还需要哪些支持。"),
+            ("先后顺序", "先交代{focus}的现状，再比较可选路径，最后讨论{goal}。"),
+            ("收件人切入", "{audience}，您好。本次同步{topic}的相关信息，希望{goal}。"),
+            ("问题切入", "关于{topic}，当前需要回答的问题是：{goal}。"),
+            ("重点取舍", "讨论{topic}，先把影响{focus}的关键信息说清楚。"),
+            ("信息边界", "以下围绕{topic}区分已确认信息、尚存风险与待确认安排。"),
+            ("简短同步", "本次沟通聚焦{focus}，目标是{goal}。"),
+        ),
+        "section_heading": (
+            ("主题直述", "{focus}"),
+            ("三项检查", "{focus}：进展、风险与选择"),
+            ("四项检查", "{focus}：目标、状态、依赖与交付"),
+            ("现状与需求", "{focus}的当前情况与协作需求"),
+            ("问题与路径", "从{focus}的问题到解决路径"),
+            ("决策焦点", "{focus}：需要确认的事项"),
+            ("下一步", "{focus}的下一步安排"),
+            ("阻塞问题", "影响{focus}的主要阻塞"),
+            ("方案比较", "{focus}的可选方案与取舍"),
+            ("协作约定", "{focus}的协作方式与验收标准"),
+        ),
+        "topic_sentence": (
+            ("直接统领", "本段围绕{focus}展开，重点说明{goal}。"),
+            ("三项判断", "讨论{focus}，需要同步已知进展、说明现实风险、确认下一步选择。"),
+            ("四项信息", "关于{focus}，目标、状态、依赖与交付应分别说明。"),
+            ("情况与需求", "{focus}既需要清楚的现状说明，也需要明确的协作请求。"),
+            ("问题到选择", "围绕{focus}，先明确问题，再比较路径，最后确认选择。"),
+            ("判断边界", "对{focus}的判断应基于已确认的信息，而非默认假设。"),
+            ("证据先行", "分析{focus}，应回到实际记录和可核对的信息。"),
+            ("读者需要", "向{audience}说明{focus}，应优先呈现与本次决定有关的信息。"),
+            ("过渡到请求", "说明当前情况后，以下列出{focus}仍需确认的事项。"),
+            ("突出重点", "关于{topic}，比罗列过程更重要的是讲清{focus}的状态与影响。"),
+        ),
+    },
+    "academic": {
+        "title": (
+            ("研究主题", "{topic}"),
+            ("问题与目标", "{topic}：{goal}"),
+            ("主题与文体", "{topic}——{content_type}"),
+            ("三维综述", "{topic}：概念、方法与证据"),
+            ("四维综述", "{topic}：问题、理论、方法与边界"),
+            ("共识与分歧", "{topic}研究的共识与分歧"),
+            ("研究脉络", "{topic}：从问题界定到证据比较"),
+            ("四维评述", "{topic}的四个分析维度：概念、理论、方法与证据"),
+            ("问题聚焦", "{topic}中的{focus}问题"),
+            ("研究设问", "如何理解{topic}：问题与分析路径"),
+            ("研究视角", "{topic}的研究视角与适用范围"),
+            ("规范文体", "{topic}：{content_type}"),
+            ("主题评述", "{focus}研究述评"),
+        ),
+        "opening": (
+            ("问题界定", "本文聚焦{topic}，拟回答{goal}，并明确相关概念与材料边界。"),
+            ("三层综述", "讨论{topic}，需厘清概念界定、比较研究方法、审视证据强度。"),
+            ("四层框架", "围绕{topic}，本文分别考察研究问题、理论视角、资料方法与解释边界。"),
+            ("比较视角", "分析{topic}，既要比较已有研究的共同认识，也要辨析结论分歧的条件。"),
+            ("论证路径", "本文由{focus}的问题界定进入证据比较，再讨论{topic}的解释范围。"),
+            ("研究定位", "为讨论{topic}，本文先明确研究问题与分析范围，再梳理相关证据。"),
+            ("研究问题", "{topic}中哪些问题已有证据支持，哪些判断仍有待检验？"),
+            ("方法差异", "理解{topic}的研究差异，需要区分概念、资料与方法上的不同。"),
+            (
+                "材料边界",
+                "本文关于{topic}的讨论仅基于已提供的研究材料，文献覆盖与证据强度仍需核查。",
+            ),
+            ("简明定位", "本文以{topic}为讨论对象，重点考察{focus}。"),
+        ),
+        "section_heading": (
+            ("研究焦点", "{focus}"),
+            ("概念方法证据", "{focus}：概念、方法与证据"),
+            ("四维比较", "{focus}：问题、理论、资料与解释"),
+            ("共识与争论", "{focus}的共识与争论"),
+            ("分析路径", "从{focus}的界定到证据比较"),
+            ("证据范围", "{focus}：已有认识及其边界"),
+            ("方法考察", "{focus}的研究方法与适用条件"),
+            ("未决问题", "{focus}中仍待回答的问题"),
+            ("解释比较", "{focus}的不同解释路径"),
+            ("理论关系", "{focus}的理论关系与可检验命题"),
+        ),
+        "topic_sentence": (
+            ("问题统领", "本段考察{focus}，重点区分相关主张及其证据依据。"),
+            ("三项比较", "对{focus}的比较应同时考察概念口径、研究方法与证据强度。"),
+            ("四项边界", "讨论{focus}时，研究对象、资料来源、分析方法与适用范围需要分别说明。"),
+            ("条件判断", "关于{focus}的结论既取决于资料条件，也受到研究设计的约束。"),
+            ("论证递进", "对{focus}的论证应从概念界定进入证据分析，再讨论解释边界。"),
+            ("判断审慎", "对{focus}的判断需要与可核查的研究依据相对应。"),
+            ("证据核对", "关于{focus}的每项文献主张，均需回查实际来源及相关页段。"),
+            ("解释深度", "呈现{focus}时，应明确术语含义、证据条件与尚存的不确定性。"),
+            ("论证过渡", "在界定研究问题后，以下进一步考察{focus}的相关证据。"),
+            ("分歧定位", "与其概括性地罗列{topic}研究，更需要辨析{focus}的证据差异。"),
+        ),
+    },
+    "media": {
+        "title": (
+            ("主题直述", "{topic}"),
+            ("读者价值", "{topic}：{goal}"),
+            ("焦点与背景", "看懂{focus}——{topic}"),
+            ("三项看点", "事件、背景与影响——{topic}"),
+            ("四项看点", "事实、细节、背景与疑问——{topic}"),
+            ("表象与背景", "{topic}：现象之外，还有哪些背景"),
+            ("信息路径", "从{focus}出发，看懂{topic}"),
+            ("四问导读", "{topic}四问：发生什么、为何关注、依据何在、如何理解"),
+            ("读者焦点", "关于{topic}，值得了解的信息"),
+            ("解释问题", "{topic}，究竟该怎么看"),
+            ("受众导读", "给{audience}的{topic}导读"),
+            ("内容类型", "{topic}｜{content_type}"),
+            ("简洁焦点", "看懂{focus}"),
+        ),
+        "opening": (
+            ("信息直述", "关于{topic}，先说明与{audience}最相关的信息。"),
+            ("三层展开", "{topic}发生了什么、有哪些背景、该如何理解？先从已知事实说起。"),
+            ("四项导读", "读懂{topic}，不妨分开看事实、细节、背景与尚待解答的问题。"),
+            ("事实与解读", "谈{topic}，既要说清发生了什么，也要分清哪些是对事实的解释。"),
+            ("层层展开", "先了解{focus}，再补充相关背景，最后讨论{topic}意味着什么。"),
+            ("读者切入", "如果你也关注{topic}，可以先从{focus}这个问题看起。"),
+            ("问题切入", "关于{topic}，{audience}最需要知道什么？"),
+            ("信息取舍", "比给{topic}贴上标签更重要的，是把{focus}的来龙去脉说清楚。"),
+            ("事实边界", "以下围绕{topic}整理已知信息，并将事实、引述和观点分别标明。"),
+            ("短句开场", "今天聊{topic}，先把{focus}说清楚。"),
+        ),
+        "section_heading": (
+            ("焦点直述", "{focus}"),
+            ("三层看点", "{focus}：事实、背景与影响"),
+            ("四层信息", "{focus}：主体、过程、背景与疑问"),
+            ("信息与解读", "{focus}：已知信息与不同解读"),
+            ("前因后果", "从{focus}看相关背景"),
+            ("解释焦点", "{focus}：值得了解的细节"),
+            ("读者提示", "关于{focus}，先看这些信息"),
+            ("读者疑问", "关于{focus}，还有什么待解答"),
+            ("理解路径", "理解{focus}的几个角度"),
+            ("背景解释", "{focus}背后的运作方式"),
+        ),
+        "topic_sentence": (
+            ("焦点统领", "谈到{focus}，先区分已知信息与尚待核实的细节。"),
+            ("三层展开", "理解{focus}，要看具体事实、补齐相关背景、分辨不同观点。"),
+            ("四项信息", "围绕{focus}，主体、经过、背景与信息来源需要交代清楚。"),
+            ("细节与全貌", "介绍{focus}，既要给出必要细节，也要保留理解全貌的背景。"),
+            ("叙事顺序", "从{focus}的已知信息出发，再逐步展开背景与解释。"),
+            ("读者重点", "关于{focus}，值得关注的是它与读者具体问题之间的联系。"),
+            ("信息溯源", "{focus}的事实描述与直接引语应分别标明可核对的来源。"),
+            ("受众关联", "向{audience}介绍{focus}，应先说明与其相关的具体信息。"),
+            ("叙事过渡", "了解基本情况后，再来看{focus}有哪些值得补充的背景。"),
+            ("避免标签", "相比概括性地评价{topic}，把{focus}的具体情况讲清楚更有帮助。"),
+        ),
+    },
+}
+
+
+def _scenario_formulas(kind: HeadlineKind, pack_id: str) -> tuple[HeadlineFormula, ...]:
+    profile = get_scenario_profile(pack_id)
+    templates = _SCENE_TEMPLATES.get(profile.id, {}).get(kind)
+    if templates is None:
+        return _FORMULAS[kind]
+    return tuple(
+        formula.model_copy(
+            update={
+                "name": name,
+                "template": template,
+                "rationale": (
+                    f"按{profile.name}组织{name}，以实际材料支撑表达，不预设成果或补造事实。"
+                ),
+            }
+        )
+        for formula, (name, template) in zip(_FORMULAS[kind], templates, strict=True)
+    )
+
+
 def generate_candidates(request: CandidateRequest) -> CandidateBatch:
     """Generate, score, and rank a repeatable candidate batch offline."""
 
@@ -565,7 +753,7 @@ def generate_candidates(request: CandidateRequest) -> CandidateBatch:
     selected_ids = set(request.formula_ids)
     formulas = (
         formula
-        for formula in _FORMULAS[request.kind]
+        for formula in _scenario_formulas(request.kind, request.brief.scenario_pack_id)
         if not selected_ids or formula.id in selected_ids
     )
     for order, formula in enumerate(formulas):
@@ -603,12 +791,19 @@ def generate_candidates(request: CandidateRequest) -> CandidateBatch:
     )
 
 
-def list_headline_formulas(kind: HeadlineKind | None = None) -> tuple[HeadlineFormula, ...]:
+def list_headline_formulas(
+    kind: HeadlineKind | None = None, *, scenario_pack_id: str | None = None
+) -> tuple[HeadlineFormula, ...]:
     """List the stable formula catalog, optionally scoped to one expression kind."""
 
-    if kind is not None:
-        return _FORMULAS[kind]
-    return tuple(formula for formulas in _FORMULAS.values() for formula in formulas)
+    if scenario_pack_id is None:
+        if kind is not None:
+            return _FORMULAS[kind]
+        return tuple(formula for formulas in _FORMULAS.values() for formula in formulas)
+    kinds: tuple[HeadlineKind, ...] = (kind,) if kind else tuple(_FORMULAS)
+    return tuple(
+        formula for item in kinds for formula in _scenario_formulas(item, scenario_pack_id)
+    )
 
 
 def score_candidate(text: str, request: CandidateRequest) -> CandidateScores:
@@ -662,6 +857,20 @@ def score_candidate(text: str, request: CandidateRequest) -> CandidateScores:
         audience_fit = min(100, audience_fit + 5)
 
     channel_fit = _channel_fit(value, request.kind, request.brief.channel)
+    if request.brief.scenario_pack_id == "academic":
+        # Academic fit comes from careful propositions, not addressing the
+        # audience by name or rewarding an official-speech cadence.
+        audience_fit = 92
+        rhythm = 90 if len(segments) <= 4 else 75
+        if any(term in value for term in ("压实责任", "提高站位", "促落实", "开新局", "政治站位")):
+            audience_fit = 30
+            channel_fit = min(channel_fit, 30)
+        if any(term in value for term in ("首次证明", "填补空白", "彻底解决", "颠覆性")):
+            channel_fit = min(channel_fit, 45)
+    elif request.brief.scenario_pack_id in {"workplace", "media"}:
+        if any(term in value for term in ("提高政治站位", "压实政治责任", "熔铸于魂")):
+            audience_fit = 40
+            channel_fit = min(channel_fit, 40)
     factual_restraint = 100
     source_text = " ".join(
         (

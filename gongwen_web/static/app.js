@@ -16,6 +16,11 @@
   const workspaceContext = globalThis.YanzhangWorkspaceContext;
   if (!workspaceContext) throw new Error("写作任务上下文模块未加载");
   const RECIPE_CATALOG = workspaceContext.RECIPE_CATALOG;
+  const scenarioCatalog = globalThis.YanzhangScenarioCatalog;
+  const scenarioWorkspace = globalThis.YanzhangScenarioWorkspace;
+  if (!scenarioCatalog || !scenarioWorkspace) throw new Error("场景工作台未加载");
+  const executionMode = globalThis.YanzhangExecutionMode;
+  if (!executionMode) throw new Error("生成方式说明模块未加载");
 
   const $ = (selector, scope = document) => scope.querySelector(selector);
   const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
@@ -24,6 +29,10 @@
   let appState = freshState();
   let settings = { mode: "demo", providerName: "openai", baseUrl: "", modelName: "" };
   let sessionApiKey = "";
+  let modelSettingsSerial = 0;
+  let serviceConnected = null;
+  let providerTestSerial = 0;
+  let drawerReturnFocus = null;
   let sessionAccessToken = "";
   let accessTokenRequired = false;
   let serverProvider = { configured: false, providerName: "", defaultModel: "" };
@@ -33,6 +42,7 @@
   let catalogRequestSerial = 0;
   let projectListRequestSerial = 0;
   let generationRequestSerial = 0;
+  let expressionRequestSerial = 0;
   let serverDocumentSaveSerial = 0;
   let methodologyCatalog = { titleFormulas: [], contentMethodologies: [], defaults: [] };
   let methodologyCatalogReady = false;
@@ -42,19 +52,6 @@
   let projectAssetsLoading = false;
   let projectSwitchSerial = 0;
   let projectRequestController = new AbortController();
-
-  const EXAMPLE = {
-    document_type: "工作总结",
-    topic: "2026年上半年数字化转型",
-    purpose: "系统总结阶段性成效，分析问题并部署下一步工作",
-    audience: "各处室、各直属单位",
-    tone: "严谨规范",
-    reference_style: "权威媒体综合写法",
-    length: "标准",
-    requirements: "突出数据成效，问题分析客观，下一步任务写明时间节点。",
-    materials:
-      "截至2026年6月30日，统一事项平台已接入18个处室，累计流转事项12,604件，平均办理时长较去年同期下降31%。完成6个业务系统整合，清理重复账号241个；开展业务培训8场，覆盖420人次。目前仍存在数据标准不统一、基层重复填报等问题。下一步计划于9月底前完成数据目录，于10月启动移动审批试点。",
-  };
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -66,8 +63,11 @@
         content_methodology_id: "", custom_methodology: null, title_formula_ids: [], title_count: 5,
         custom_title_formula: null,
       },
-      document: { title: "", html: "", candidates: [], outline: [] },
+      document: { title: "", html: "", candidates: [], outline: [], execution: null, title_execution: null },
       review: null,
+      scenarioId: "gongwen",
+      scenarioPreferences: {},
+      styleCustom: false,
       factAudit: null,
       styleReferences: [],
       serverDocumentId: "",
@@ -134,6 +134,14 @@
   function cacheElements() {
     [
       "saveDot", "saveStatus", "historyButton", "serverDocumentsButton", "focusButton", "settingsButton", "quickExportButton",
+      "engineBanner", "engineBannerTitle", "engineBannerDetail", "engineBannerButton", "retryConnectionButton",
+      "documentExecution", "titleExecution", "serverProviderTitle", "serverProviderDetail",
+      "appShell", "scenarioOverview", "scenarioName", "scenarioDescription", "scenarioCapabilities", "toneSelector",
+      "topicLabel", "purposeLabel", "audienceLabel", "materialsLabel", "requirementsLabel", "keywordsLabel",
+      "referenceStyleLabel", "materialSectionLabel", "referenceStyleDescription", "referencePickerTitle", "referencePickerDescription",
+      "openProjectMaterialsButton", "openAcademicReferencesButton", "sceneEvidenceNote", "generateButtonLabel",
+      "knowledgeItemLabel", "knowledgeSelectedLabel", "knowledgeFactLabel", "reviewSceneDescription", "deliverySceneNote",
+      "hubFormatLabel", "hubStructureLabel", "hubFactLabel", "hubLanguageLabel", "hubCitationLabel",
       "inputPanel", "writingPanel", "reviewPanel", "writingForm", "loadExampleButton", "documentType",
       "length", "topic", "topicCount", "purpose", "audience", "referenceStyle", "requirements", "clearRequirements",
       "materials", "materialCount", "materialFile", "uploadMaterialButton", "materialFileName",
@@ -198,6 +206,151 @@
     ].forEach((id) => { if (document.getElementById(id)) els[id] = document.getElementById(id); });
   }
 
+  function currentScenario() {
+    return scenarioWorkspace.profile(phase2State.brief.scenario_pack_id || appState.scenarioId);
+  }
+
+  function selectedStyleDescription() {
+    return currentScenario().styles.find((item) => item.label === els.referenceStyle.value)?.description || "";
+  }
+
+  function updateReferenceStyleDescription() {
+    els.referenceStyleDescription.textContent = selectedStyleDescription();
+  }
+
+  function renderScenarioControls(scene, values = {}) {
+    els.appShell.dataset.scenario = scene.id;
+    els.scenarioOverview.dataset.scenario = scene.id;
+    els.inputPanel.dataset.scenario = scene.id;
+    els.scenarioName.textContent = scene.name;
+    els.scenarioDescription.textContent = scene.description;
+    els.scenarioCapabilities.textContent = `${scene.styles.length} 种表达方法 · ${scenarioCatalog.recipes[scene.id].length} 个写作配方 · 独立材料与审校标准`;
+    els.referenceStyle.replaceChildren(...scene.styles.map((style) => makeOption(style.label, style.label)));
+    els.referenceStyle.value = scene.styles.some((style) => style.label === values.reference_style) ? values.reference_style : scene.default_style;
+    els.toneSelector.replaceChildren(...scene.tones.map((tone) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input"); input.type = "radio"; input.name = "tone"; input.value = tone;
+      input.checked = tone === (scene.tones.includes(values.tone) ? values.tone : scene.default_tone);
+      input.addEventListener("change", handleFormInput);
+      const text = document.createElement("span"); text.textContent = tone; label.append(input, text); return label;
+    }));
+    const labelIds = { topic: "topicLabel", purpose: "purposeLabel", audience: "audienceLabel", materials: "materialsLabel", requirements: "requirementsLabel", keywords: "keywordsLabel", reference_style: "referenceStyleLabel" };
+    Object.entries(labelIds).forEach(([key, id]) => { els[id].textContent = scene.labels[key]; });
+    const fieldIds = { topic: "topic", purpose: "purpose", audience: "audience", materials: "materials", requirements: "requirements", keywords: "briefKeywords" };
+    Object.entries(fieldIds).forEach(([key, id]) => { els[id].placeholder = scene.placeholders[key]; });
+    els.materialSectionLabel.textContent = scene.labels.materials;
+    els.generateButtonLabel.textContent = scene.labels.generate;
+    els.referencePickerTitle.textContent = scene.source.title;
+    els.referencePickerDescription.textContent = scene.source.description;
+    els.openArticleLibraryButton.textContent = scene.source.action_label;
+    els.openProjectMaterialsButton.hidden = scene.source.action === "materials";
+    // Academic tools are entered through the academic scene, not advertised as
+    // a workplace style-reference shortcut.
+    els.openAcademicReferencesButton.hidden = true;
+    els.selectedReferences.hidden = scene.id !== "gongwen";
+    els.sceneEvidenceNote.hidden = false;
+    els.sceneEvidenceNote.textContent = scene.id === "academic"
+      ? "文献元数据不是原文证据。已导入的文献和可定位片段会参与本场景成文；无证据时只给结构与待补项，不编造结论。"
+      : "内置写法是原创结构方法，不是已抓取的范文。项目事实、历史样文与外部写法参考分开管理；换场景会暂存当前输入，不自动混用。";
+    scene.checklist.forEach((label, index) => { const element = document.getElementById(`checklistLabel${index}`); if (element) element.textContent = label; });
+    const reviewDescriptions = {
+      gongwen: ["文档类型、层级、称谓与日期", "逻辑、标题、段首与衔接", "数字、主体、时间与出处", "赘词、歧义与表达力度"],
+      workplace: ["结论、沟通请求与决策要点", "背景、依据、选项与下一步", "记录、估算与承诺依据", "动作、负责人、期限与待确认项"],
+      media: ["读者关切、信息重点与受众", "导语、背景、展开与收束", "事实、引语、消息源与核验", "篇幅、媒介形式与发布要求"],
+      academic: ["研究问题、概念与论证边界", "研究结构、方法与材料范围", "主张、原文证据与引用定位", "术语一致、审慎措辞与推断边界"],
+    };
+    ["hubFormatLabel", "hubStructureLabel", "hubFactLabel", "hubLanguageLabel"].forEach((id, index) => {
+      if (!els[id]) return;
+      els[id].textContent = scene.review_dimensions[index];
+      if (els[id].nextElementSibling) els[id].nextElementSibling.textContent = reviewDescriptions[scene.id][index];
+    });
+    if (els.hubCitationLabel) els.hubCitationLabel.textContent = scene.id === "academic" ? "引文与证据" : "来源溯源";
+    if (els.reviewSceneDescription) els.reviewSceneDescription.textContent = `${scene.name}：${scene.checklist.slice(0, 4).join("；")}。自动检查仅作辅助，未运行的维度不会显示为已通过。`;
+    if (els.deliverySceneNote) els.deliverySceneNote.textContent = scene.id === "academic"
+      ? "导出为可编辑通用 Word；参考文献可先追加到母稿。期刊专用版式、参考文献管理器域和投稿规范仍需按期刊要求核对。"
+      : scene.id === "workplace" ? "邮件、周报与方案可复制或导出为通用 Word；演示提纲为文字内容，不冒充已生成 PPT 文件。" : "导出当前母稿及已采用内容；渠道变体保留母稿来源，发布前核对格式和事实。";
+    if (els.knowledgeItemLabel) els.knowledgeItemLabel.textContent = "当前项目材料";
+    if (els.knowledgeSelectedLabel) els.knowledgeSelectedLabel.textContent = scene.id === "academic" ? "已导入文献" : "本场景写法样本";
+    if (els.knowledgeFactLabel) els.knowledgeFactLabel.textContent = scene.id === "academic" ? "原文证据片段" : "本场景事实卡";
+    els.knowledgeOpenLibraryButton.textContent = scene.source.action_label;
+    els.projectMaterialTitle.placeholder = `${scene.name} · 原始记录或材料标题`;
+    els.projectMaterialContent.placeholder = scene.placeholders.materials;
+    els.academicIntegrityResult.hidden = scene.id !== "academic";
+    updateReferenceStyleDescription();
+  }
+
+  function applyScenarioProfile(context) {
+    const from = appState.scenarioId || scenarioWorkspace.inferScenario(appState.form.document_type);
+    const to = context.scenarioPackId;
+    const current = {
+      topic: els.topic.value, purpose: els.purpose.value, audience: els.audience.value,
+      materials: els.materials.value, requirements: els.requirements.value,
+      keywords: els.briefKeywords.value, constraints: els.briefConstraints.value,
+      reference_style: els.referenceStyle.value || appState.form.reference_style,
+      tone: $('input[name="tone"]:checked')?.value || appState.form.tone,
+      style_custom: appState.styleCustom, styleReferences: appState.styleReferences,
+      material_ids: phase2State.material_ids,
+    };
+    const transition = scenarioWorkspace.transition({ from, to, recipeId: context.recipeId, preferences: appState.scenarioPreferences, current });
+    appState.scenarioPreferences = transition.preferences;
+    appState.scenarioId = to;
+    appState.styleCustom = transition.values.style_custom;
+    if (from !== to) {
+      ["topic", "purpose", "audience", "materials", "requirements"].forEach((key) => { els[key].value = transition.values[key] || ""; });
+      els.briefKeywords.value = transition.values.keywords || "";
+      els.briefConstraints.value = transition.values.constraints || "";
+      phase2State.material_ids = Array.isArray(transition.values.material_ids) ? transition.values.material_ids : [];
+    }
+    appState.styleReferences = transition.values.styleReferences;
+    renderScenarioControls(currentScenario(), transition.values);
+    renderSelectedReferences();
+    renderSceneRecipes();
+    selectExpressionFocus(phase2State.expression.focus || "title", false);
+    updateFacts();
+  }
+
+  function activateScenario(packId) {
+    if (!scenarioCatalog.profiles[packId]) return false;
+    if (phase2State.brief.scenario_pack_id === packId) return true;
+    els.briefScenarioPack.value = packId;
+    reconcileTaskContext("scenario_pack");
+    return true;
+  }
+
+  function openProjectMaterials() {
+    openSuiteView("knowledge", { focusId: "projectMaterialComposer", openDetails: true });
+  }
+
+  function openScenarioReferences() {
+    const action = currentScenario().source.action;
+    if (action === "academic") { openSuiteView("academic", { focusId: "academicImportContent" }); return; }
+    if (action === "materials") { openProjectMaterials(); return; }
+    openArticleLibrary();
+  }
+
+  function currentFactualMaterialText() {
+    return [els.materials.value.trim(), currentScenario().id === "academic" ? scenarioWorkspace.academicMaterials(phase2State.academic) : ""].filter(Boolean).join("\n\n");
+  }
+
+  function renderSceneRecipes() {
+    els.recipeCatalog.replaceChildren();
+    const active = currentScenario().id;
+    const order = [active, ...Object.keys(scenarioCatalog.profiles).filter((id) => id !== active)];
+    order.forEach((packId) => scenarioCatalog.recipes[packId].forEach((recipe) => {
+      const article = document.createElement("article"); article.className = `recipe-card${packId === active ? " is-featured" : ""}`;
+      article.dataset.recipeId = recipe.id;
+      const top = document.createElement("div"); top.className = "recipe-card-top";
+      const category = document.createElement("span"); category.textContent = scenarioCatalog.profiles[packId].name;
+      const badge = document.createElement("b"); badge.textContent = recipe.id === phase2State.brief.recipe_id ? "当前配方" : "内置配方"; top.append(category, badge);
+      const title = document.createElement("h2"); title.textContent = recipe.name;
+      const summary = document.createElement("p"); summary.textContent = recipe.summary;
+      const list = document.createElement("ol"); recipe.sections.forEach((section) => { const li = document.createElement("li"); li.textContent = section.title; list.append(li); });
+      const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "采用此配方";
+      button.addEventListener("click", () => applyRecipe(recipe.id));
+      article.append(top, title, summary, list, button); els.recipeCatalog.append(article);
+    }));
+  }
+
   function bindEvents() {
     const formInputs = $$('input:not([type="file"]), textarea, select', els.writingForm);
     const specializedFormControls = new Set([
@@ -255,6 +408,8 @@
     $$('.checklist input').forEach((checkbox, index) => checkbox.addEventListener("change", () => updateChecklist(index, checkbox.checked)));
 
     els.settingsButton.addEventListener("click", openSettings);
+    els.engineBannerButton.addEventListener("click", openSettings);
+    els.retryConnectionButton.addEventListener("click", retryServiceConnection);
     els.footerSettingsButton.addEventListener("click", openSettings);
     els.historyButton.addEventListener("click", openHistory);
     $$('[data-close-drawer]').forEach((button) => button.addEventListener("click", closeDrawers));
@@ -273,7 +428,10 @@
     els.batchFile.addEventListener("change", importBatchFile);
     els.detectVariablesButton.addEventListener("click", detectVariables);
     els.generateBatchButton.addEventListener("click", exportBatch);
-    els.openArticleLibraryButton.addEventListener("click", openArticleLibrary);
+    els.openArticleLibraryButton.addEventListener("click", openScenarioReferences);
+    els.openProjectMaterialsButton.addEventListener("click", openProjectMaterials);
+    els.openAcademicReferencesButton.addEventListener("click", () => { activateScenario("academic"); openSuiteView("academic"); });
+    els.referenceStyle.addEventListener("change", () => { appState.styleCustom = true; updateReferenceStyleDescription(); });
     els.searchArticlesButton.addEventListener("click", loadArticles);
     els.articleSearch.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); loadArticles(); } });
     els.articleSourceFilter.addEventListener("change", loadArticles);
@@ -292,6 +450,7 @@
 
     $$("[data-suite-view]").forEach((button) => button.addEventListener("click", () => openSuiteView(button.dataset.suiteView)));
     $$("[data-open-view]").forEach((button) => button.addEventListener("click", () => {
+      if (button.dataset.openView === "academic") activateScenario("academic");
       openSuiteView(button.dataset.openView, { focusId: button.dataset.projectFocus || "" });
     }));
     $(".brand")?.addEventListener("click", (event) => { event.preventDefault(); openSuiteView("home"); });
@@ -319,7 +478,7 @@
     });
     els.generateVariantsButton.addEventListener("click", generateVariants);
 
-    els.knowledgeOpenLibraryButton.addEventListener("click", openArticleLibrary);
+    els.knowledgeOpenLibraryButton.addEventListener("click", openScenarioReferences);
     els.knowledgeCollectButton.addEventListener("click", () => {
       openArticleLibrary();
       window.setTimeout(() => els.collectKeywords?.focus(), 80);
@@ -578,6 +737,10 @@
     phase2State.brief.scenario_pack_id = context.scenarioPackId;
     phase2State.brief.recipe_id = context.recipeId;
     phase2State.brief.recipe_content_type = context.documentType;
+    const contentLabels = { "official-document": "规范公文", "leadership-speech": "领导讲话", "research-report": "调研报告", "news-release": "新闻通稿", "academic-paper": "学术论文", "general-writing": context.scenarioPackId === "workplace" ? "职场文字" : "传播内容" };
+    const contentTypes = workspaceContext.PACK_CONTENT_TYPES[context.scenarioPackId];
+    els.briefContentType.replaceChildren(...contentTypes.map((type) => makeOption(type, contentLabels[type])));
+    els.briefContentType.disabled = contentTypes.length === 1;
     els.briefContentType.value = context.contentType;
     els.briefScenarioPack.value = context.scenarioPackId;
     updateRecipeOptions(context.recipeId, false);
@@ -587,6 +750,7 @@
     appState.form.document_type = context.documentType;
     els.documentBadge.textContent = context.documentType;
     els.paperType.textContent = context.documentType;
+    applyScenarioProfile(context);
     if (context.scenarioPackId === "academic") {
       const taskType = context.academicTaskType || "literature-review";
       setSelectValue(els.academicTaskType, taskType, "literature-review");
@@ -618,12 +782,15 @@
   function clearTaskDerivedOutputs(context = activeRecipeContext(), { discardDraft = false } = {}) {
     const hasRetainedDraft = !discardDraft && Boolean(els.documentTitle.value.trim() || documentPlainText());
     appState.document.candidates = [];
+    appState.document.title_execution = null;
     appState.document.outline = recipeOutline(context);
     appState.review = null;
     appState.factAudit = null;
     appState.serverDocumentId = "";
     appState.serverDocumentVersion = 0;
     appState.checklist = [false, false, false, false, false, false];
+    $$('.checklist input').forEach((checkbox) => { checkbox.checked = false; });
+    els.checkProgress.textContent = "0/6";
     phase2State.expression.results = [];
     phase2State.selected_title = "";
     phase2State.master_asset_id = "";
@@ -638,6 +805,7 @@
     if (!hasRetainedDraft) {
       appState.document.title = "";
       appState.document.html = "";
+      appState.document.execution = null;
       els.documentTitle.value = "";
       els.documentEditor.replaceChildren();
       els.generationHero.classList.remove("is-hidden");
@@ -800,7 +968,7 @@
     const packId = els.briefScenarioPack.value || "gongwen";
     const recipeId = els.briefRecipe.value || RECIPE_CATALOG[packId]?.[0]?.[0];
     const channels = (RECIPE_CATALOG[packId] || []).find(([id]) => id === recipeId)?.[3] || ["document"];
-    const labels = { document: "机关文件", email: "工作邮件", meeting: "会议使用", presentation: "汇报演示", web: "门户网站", social: "政务新媒体", academic: "学术期刊" };
+    const labels = { document: packId === "gongwen" ? "机关文件" : "文档 / 报告", email: "电子邮件", meeting: "会议沟通", presentation: "演示汇报", web: "网站 / 公众号", social: "社交媒体", academic: "学术期刊" };
     const selected = channels.includes(String(preferred || phase2State.brief.channel)) ? String(preferred || phase2State.brief.channel) : channels[0];
     els.briefChannel.replaceChildren(...channels.map((channel) => makeOption(channel, labels[channel] || channel)));
     els.briefChannel.value = selected;
@@ -840,7 +1008,7 @@
     const target = document.getElementById(id);
     if (!target) return;
     const details = target.matches("details") ? target : target.closest("details");
-    if (details && (forceDetails || id === "variantStudio" || id === "briefCard")) details.open = true;
+    if (details) details.open = true;
     const panel = target.matches(".mobile-panel") ? target : target.closest(".mobile-panel");
     if (panel && window.matchMedia("(max-width: 1080px)").matches) {
       $$(".mobile-panel").forEach((item) => item.classList.toggle("is-active", item === panel));
@@ -868,7 +1036,7 @@
       tone: $('input[name="tone"]:checked')?.value || "严谨规范",
       length: els.length.value,
       target_language: phase2State.brief.target_language,
-      constraints: boundedTextList([els.requirements.value, phase2State.brief.constraints], 500, 32),
+      constraints: boundedTextList([`表达方法：${els.referenceStyle.value}。${selectedStyleDescription()}`, els.requirements.value, phase2State.brief.constraints], 500, 32),
       keywords: [...new Set(phase2State.brief.keywords.split(/[，,、;；\s]+/).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
       knowledge_item_ids: phase2State.material_ids.slice(0, 128),
       model_profile_id: null,
@@ -963,7 +1131,7 @@
       titleFormulaIds,
       customTitleFormula: titleFormulaOverride,
       factLock: Boolean(appState.form.factLock),
-      materialsHash: simpleHash(appState.form.materials),
+      materialsHash: simpleHash(currentFactualMaterialText()),
       styleReferences: appState.styleReferences || [],
       workspaceMaterialIds: phase2State.material_ids,
     }));
@@ -1031,7 +1199,7 @@
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       const status = Number(error?.status || 0);
-      const canUseLocal = phase2State.local_draft_mode !== false && (!status || [404, 405, 500, 501, 502, 503, 504].includes(status));
+      const canUseLocal = options.body?.live !== true && phase2State.local_draft_mode !== false && (!status || [404, 405, 500, 501, 502, 503, 504].includes(status));
       if (!canUseLocal || typeof localFallback !== "function") throw error;
       setV2ServiceState("local");
       return { data: await localFallback(error), source: "local", error };
@@ -1128,7 +1296,7 @@
         records: phase2State.academic.records.map((item) => [item.id, item.source_hash]),
         evidence: phase2State.academic.evidence.map((item) => [item.id, item.content_hash]),
       },
-      model: [settings.mode, settings.providerName, settings.baseUrl, settings.modelName],
+      model: [settings.mode, settings.providerName, settings.baseUrl, settings.modelName, modelSettingsSerial],
     }));
   }
 
@@ -1486,7 +1654,7 @@
     persistPhase2State();
     if (nextId) {
       const pack = project?.default_pack_id || project?.scenario_pack_id;
-      if (!restoredDraft && !preserveWorkspace && pack && RECIPE_CATALOG[pack]) {
+      if (!restoredDraft && pack && RECIPE_CATALOG[pack]) {
         els.briefScenarioPack.value = pack;
         reconcileTaskContext("scenario_pack", { reloadMethodology: false });
       }
@@ -1609,7 +1777,7 @@
   function workflowKnowledgeSnapshot(projectId) {
     return JSON.stringify({
       project_id: projectId,
-      primary_material: els.materials.value,
+      primary_material: currentFactualMaterialText(),
       style_references: (appState.styleReferences || []).map((item) => [
         item.id, item.title, item.source_name, item.url, item.excerpt, item.style_features,
       ]),
@@ -1638,7 +1806,7 @@
 
   async function workflowKnowledgeEntries(projectId) {
     const entries = [];
-    const primary = els.materials.value.trim();
+    const primary = currentFactualMaterialText();
     if (primary.length > 500000) throw new Error("主参考材料最多 500000 个字符");
     if (primary) {
       entries.push({
@@ -1738,6 +1906,7 @@
   }
 
   async function runProjectWorkflow() {
+    if (!requireModelConnection({ project: true })) return;
     const projectId = requireActiveProject("生成项目母稿");
     if (!projectId) return;
     const operationSerial = projectSwitchSerial;
@@ -1749,6 +1918,7 @@
       if (!prepared) return;
       workflowInputOperation = captureInputOperation(projectId);
       if (prepared.knowledgeSource !== "server") {
+        if (settings.mode === "api") throw new Error("项目材料尚未同步，真实模型工作流未启动。请连接项目服务后重试。");
         phase2State.workflow_id = `local-workflow-${Date.now()}`;
         phase2State.workflow_status = "local_preview";
         const generated = await generateDocument();
@@ -1769,6 +1939,7 @@
         const saved = await persistPreparedBrief(projectId, operationSerial, prepared);
         if (!saved) throw new Error("任务简报尚未保存");
         if (saved.source !== "server") {
+          if (settings.mode === "api") throw new Error("任务简报尚未保存到服务端，真实模型工作流未启动。");
           phase2State.workflow_id = `local-workflow-${Date.now()}`;
           phase2State.workflow_status = "local_preview";
           const generated = await generateDocument();
@@ -1790,7 +1961,7 @@
       els.projectWorkflowStatus.textContent = "正在创建项目工作流…";
       const created = await progressiveV2(`/api/v2/projects/${encodeURIComponent(projectId)}/workflows`, {
         method: "POST",
-        body: { ...brief, auto_review: true, requested_exports: [] },
+        body: { ...brief, live: settings.mode === "api", auto_review: true, requested_exports: [] },
       }, () => ({ brief_id: phase2State.brief.id, workflow: { id: `local-workflow-${Date.now()}`, brief_id: phase2State.brief.id, status: "local_preview" } }));
       if (inputOperationIsStale(inputOperation)) return;
       const workflow = created.data?.workflow || created.data;
@@ -1897,7 +2068,7 @@
       if (!Array.isArray(asset.blocks) || !textFromAsset(asset)) throw new Error("资产详情缺少可用正文块");
       if (responseIsStale()) return null;
       if (loadIntoEditor) {
-        applyServerAsset(asset, { bindToCurrentBrief });
+        applyServerAsset(asset, { bindToCurrentBrief, execution: detailResponse.execution });
       } else {
         phase2State.master_asset_id = bindToCurrentBrief ? String(asset.id) : "";
         phase2State.master_asset_revision = bindToCurrentBrief ? Number(asset.current_revision || preferred.current_revision) || null : null;
@@ -1913,7 +2084,7 @@
     }
   }
 
-  function applyServerAsset(asset, { bindToCurrentBrief = true } = {}) {
+  function applyServerAsset(asset, { bindToCurrentBrief = true, execution = null } = {}) {
     const assetId = String(asset?.id || "");
     const assetRevision = Number(asset?.current_revision) || null;
     const title = String(asset?.title || els.topic.value.trim() || "项目母稿");
@@ -1924,7 +2095,8 @@
       els.documentType.value = assetDocumentType;
       reconcileTaskContext("document_type", { invalidate: false, persist: false });
     }
-    appState.document = { title, html: "", candidates: [], outline: [] };
+    appState.document = { title, html: "", candidates: [], outline: [], execution: executionMode.execution(execution) };
+    renderDocumentExecution();
     els.documentTitle.value = title;
     els.documentEditor.replaceChildren();
     const blocks = Array.isArray(asset?.blocks) ? asset.blocks : [];
@@ -1962,14 +2134,14 @@
 
   function updateProjectWorkflowStatus() {
     if (!els.projectWorkflowStatus) return;
+    if (phase2State.document_stale && documentPlainText()) {
+      els.projectWorkflowStatus.textContent = "任务设置已更新 · 当前编辑区保留上一版草稿供对照，请重新生成后再作为项目母稿";
+      return;
+    }
     if (!phase2State.project_id) {
       els.projectWorkflowStatus.textContent = phase2State.standalone_document
         ? "当前为独立文稿 · 不写入任何项目；选择项目后再生成项目母稿"
         : "选择项目后，可将简报、标题、母稿、审校和交付串成真实服务闭环。";
-      return;
-    }
-    if (phase2State.document_stale && documentPlainText()) {
-      els.projectWorkflowStatus.textContent = "任务设置已更新 · 当前编辑区保留上一版草稿供对照，请重新生成后再作为项目母稿";
       return;
     }
     if (phase2State.master_asset_id) {
@@ -1982,9 +2154,9 @@
 
   function renderDocumentContextStatus() {
     if (!els.documentContextStatus) return;
-    els.documentContextStatus.textContent = phase2State.standalone_document
-      ? "独立文稿 · 未关联项目"
-      : phase2State.document_stale ? "上一版草稿 · 待重生成" : "草稿";
+    els.documentContextStatus.textContent = phase2State.document_stale
+      ? "上一版草稿 · 待重生成"
+      : phase2State.standalone_document ? "独立文稿 · 未关联项目" : "草稿";
     els.documentContextStatus.classList.toggle("is-stale", Boolean(phase2State.document_stale));
     els.documentWorkspace.classList.toggle("has-stale-context", Boolean(phase2State.document_stale));
   }
@@ -2025,7 +2197,8 @@
       section_heading: "例如：四个小标题结构平行、语义递进",
       topic_sentence: "例如：每段首句先亮明判断，再展开依据和行动",
     };
-    els.expressionInstruction.placeholder = placeholders[nextFocus];
+    const generic = { title: "例如：具体、清晰，准确反映问题和价值", opening: "例如：结论先行，区分背景与证据", section_heading: "例如：按问题、方法、证据组织层级", topic_sentence: "例如：先给可核验判断，再说明依据与边界" };
+    els.expressionInstruction.placeholder = currentScenario().id === "gongwen" ? placeholders[nextFocus] : generic[nextFocus];
     if (changed && persist) {
       phase2State.expression.results = [];
       renderExpressionResults();
@@ -2047,6 +2220,8 @@
     const projectId = requireActiveProject("生成表达候选");
     if (!projectId) return;
     const operationSerial = projectSwitchSerial;
+    const requestSerial = ++expressionRequestSerial;
+    const inputOperation = captureInputOperation(projectId);
     const focus = phase2State.expression.focus;
     const count = phase2State.expression.count;
     const body = {
@@ -2060,6 +2235,7 @@
     setButtonBusy(els.generateExpressionsButton, true, "正在推演…");
     try {
       const result = await progressiveV2(path, { method: "POST", body }, () => ({ items: localExpressionCandidates(focus, count) }));
+      if (requestSerial !== expressionRequestSerial || inputOperationIsStale(inputOperation)) return;
       let candidates = normalizeExpressionCandidates(result.data);
       if (!candidates.length) {
         if (result.source === "server") throw new Error("标题服务没有返回可用候选");
@@ -2070,10 +2246,10 @@
       persistPhase2State();
       toast(result.source === "server" ? "表达候选已由项目服务生成" : "服务生成未完成；已按本地预览模式生成候选", result.source === "server" ? "success" : "info");
     } catch (error) {
-      if (projectOperationIsStale(projectId, operationSerial, error)) return;
+      if (requestSerial !== expressionRequestSerial || inputOperationIsStale(inputOperation, error)) return;
       toast(readError(error, "表达候选生成未完成"), "error");
     } finally {
-      if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.generateExpressionsButton, false);
+      if (requestSerial === expressionRequestSerial && !projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.generateExpressionsButton, false);
     }
   }
 
@@ -2087,6 +2263,9 @@
   }
 
   function localExpressionCandidates(focus, count) {
+    if (currentScenario().id !== "gongwen") return scenarioWorkspace.expressionCandidates(currentScenario().id, focus, {
+      topic: els.topic.value.trim(), goal: els.purpose.value.trim(), audience: els.audience.value.trim(), headings: activeRecipeContext().headings,
+    }, count);
     const topic = (els.topic.value.trim() || els.academicTitle.value.trim() || "重点工作").replace(/[，。！？；:：]+$/g, "");
     const goal = (els.purpose.value.trim() || "推动任务落地见效").replace(/[，。！？；:：]+$/g, "");
     const audience = els.audience.value.trim() || "干部群众";
@@ -2178,6 +2357,7 @@
   }
 
   async function generateVariants() {
+    if (!requireModelConnection({ project: true })) return;
     syncPhase2StateFromUI();
     const content = documentPlainText();
     if (!content) { toast("请先生成或输入母稿正文", "warning"); return; }
@@ -2191,6 +2371,7 @@
     try {
       const master = await ensureMasterAsset();
       if (inputOperationIsStale(inputOperation)) return;
+      if (settings.mode === "api" && master.source !== "server") throw new Error("项目服务未就绪，真实模型变体未启动。请连接项目服务后重试。");
       const variants = [];
       let usedLocal = master.source !== "server";
       for (const channel of channels) {
@@ -2201,7 +2382,7 @@
           target_channel: channel,
           instruction,
           source_revision: phase2State.master_asset_revision || undefined,
-          live: settings.mode === "api" && serverProvider.configured,
+          live: settings.mode === "api",
         } }, () => ({ asset: localVariant(channel, content) }));
         if (inputOperationIsStale(inputOperation)) return;
         const rawAsset = result.data?.asset || result.data;
@@ -2213,7 +2394,7 @@
             throw new Error(`渠道 ${channel} 的服务响应缺少可追溯的文字资产`);
           }
         }
-        const normalized = normalizeVariants({ items: [rawAsset] });
+        const normalized = normalizeVariants({ items: [{ ...rawAsset, execution: result.data?.execution || rawAsset.execution }] });
         if (!normalized.length && result.source === "server") throw new Error(`渠道 ${channel} 的服务响应缺少有效文字资产`);
         variants.push(...(normalized.length ? normalized : [localVariant(channel, content)]));
         if (result.source !== "server") usedLocal = true;
@@ -2236,6 +2417,11 @@
     if (!projectId) throw new Error("请先选择项目");
     const operationSerial = projectSwitchSerial;
     invalidateSavedBriefBinding();
+    if (phase2State.document_stale) {
+      const error = new Error("当前保留的是上一版草稿，请按新任务重新生成正文，再生成变体、审校或交付");
+      error.name = "StaleDocumentError";
+      throw error;
+    }
     if (phase2State.master_asset_id && !phase2State.master_asset_id.startsWith("local-") && !isLocalProject(projectId)) {
       await saveMasterRevisionToServer(projectId, phase2State.master_asset_id);
       return { id: phase2State.master_asset_id, source: "server" };
@@ -2258,7 +2444,7 @@
     const result = await progressiveV2(`/api/v2/projects/${encodeURIComponent(projectId)}/assets`, { method: "POST", body: {
       brief_id: expectedBriefId,
       title: els.documentTitle.value.trim() || els.topic.value.trim() || undefined,
-      live: settings.mode === "api" && serverProvider.configured,
+      live: false,
     } }, () => ({ asset: { id: `local-asset-${Date.now()}` } }));
     if (inputOperationIsStale(inputOperation)) throw new DOMException("写作输入已变化", "AbortError");
     const asset = result.data?.asset || result.data?.item || result.data || {};
@@ -2343,6 +2529,7 @@
         title,
         content,
         parent_asset_id: parentAssetId,
+        execution: executionMode.execution(item.execution),
       };
     }).filter(Boolean);
   }
@@ -2365,24 +2552,24 @@
     const limits = { short: 500, medium: 1200, long: 2500, auto: 1500 };
     const clipped = normalized.length > limits[targetLength] ? `${normalized.slice(0, limits[targetLength])}……` : normalized;
     const transformations = {
-      document: { title: `机关文件｜${title}`, content: `【核心信息】${firstSentence(normalized)}\n\n【进展与成效】\n${clipped}\n\n【下一步】请结合母稿中的责任、时限和事实依据形成落实清单。` },
+      document: { title: `文档｜${title}`, content: `【母稿摘录】\n${clipped}\n\n【待整理】按交付目的确认结构与来源说明；缺失信息保留待补标记。` },
       email: { title: `工作邮件｜${title}`, content: `主题：${title}\n\n各位同事：\n\n${firstSentence(normalized)}\n\n${clipped}\n\n请按母稿明确的责任与时限推进，并及时反馈进展。` },
       meeting: { title: `会议材料｜${title}`, content: `会议议题：${title}\n\n一、核心结论\n${firstSentence(normalized)}\n\n二、讨论要点\n${clipped}\n\n三、议定事项\n请依据母稿补充责任主体、完成时限和跟踪方式。` },
       presentation: { title: `汇报演示｜${title}`, content: `封面｜${title}\n\n01 核心判断\n${firstSentence(normalized)}\n\n02 事实与进展\n${clipped}\n\n03 下一步行动\n按母稿中的责任、节点与证据逐项呈现。` },
-      web: { title: `门户稿件｜${title}`, content: `${title}\n\n近日，相关工作围绕既定目标有序推进。${firstSentence(normalized)}\n\n${clipped}` },
-      social: { title: `政务新媒体｜${title}`, content: `一图读懂｜${title}\n\n✅ 为什么做\n${firstSentence(normalized)}\n\n✅ 做了什么\n${clipped}\n\n✅ 下一步怎么干\n以母稿明确的责任与时限为准。` },
-      academic: { title: `研究文本｜${title}`, content: `摘要：本文围绕${title}展开，梳理问题背景、实践路径与实施条件。${firstSentence(normalized)}在此基础上，归纳可复用的分析框架，并强调所有数据、引用与结论应回到原始材料核验。\n\n关键词：${phase2State.brief.keywords || "实践；治理；成效"}` },
+      web: { title: `网站稿件｜${title}`, content: `${title}\n\n${clipped}\n\n【待确认：发布对象、导语和来源说明】` },
+      social: { title: `社交媒体｜${title}`, content: `一图读懂｜${title}\n\n✅ 为什么做\n${firstSentence(normalized)}\n\n✅ 做了什么\n${clipped}\n\n✅ 下一步怎么干\n以母稿明确的责任与时限为准。` },
+      academic: { title: `研究文本｜${title}`, content: `【摘要整理框架，待原文证据补齐】\n研究问题：${title}\n方法：【待补：以原始研究记录为准】\n结果：【待补：仅填写有数据和引用依据的发现】\n结论：【待补：说明适用范围与局限】\n\n【母稿摘录，尚未核验为学术证据】\n${clipped}\n\n关键词：${phase2State.brief.keywords || "【待补】"}` },
     };
     const item = transformations[channel] || { title: channelLabel(channel), content: clipped };
-    return { id: `local-${channel}-${Date.now()}`, channel, ...item, parent_asset_id: phase2State.master_asset_id || "" };
+    return { id: `local-${channel}-${Date.now()}`, channel, ...item, parent_asset_id: phase2State.master_asset_id || "", execution: executionMode.execution({ mode: "local" }) };
   }
 
   function firstSentence(text) {
-    return String(text || "").split(/[。！？\n]/).map((item) => item.trim()).find(Boolean) || "相关工作正按计划推进。";
+    return String(text || "").split(/[。！？\n]/).map((item) => item.trim()).find(Boolean) || "【待补核心信息】";
   }
 
   function channelLabel(channel) {
-    const labels = { document: "机关文件", email: "工作邮件", meeting: "会议使用", presentation: "汇报演示", web: "门户网站", social: "政务新媒体", academic: "学术文本" };
+    const labels = { document: currentScenario().id === "gongwen" ? "机关文件" : "文档 / 报告", email: "电子邮件", meeting: "会议沟通", presentation: "演示汇报", web: "网站 / 公众号", social: "社交媒体", academic: "学术文本" };
     return labels[String(channel || "")] || "渠道变体";
   }
 
@@ -2403,9 +2590,9 @@
       const text = String(variant.content || "").replace(/\s+/g, " ").trim();
       preview.textContent = `${text.slice(0, 260)}${text.length > 260 ? "…" : ""}`;
       const foot = document.createElement("div");
-      const meta = document.createElement("small"); meta.textContent = `${countChinese(text)} 字 · 关联当前母稿`;
+      const meta = document.createElement("small"); meta.textContent = `${countChinese(text)} 字 · ${executionMode.execution(variant.execution)?.label || "生成来源未记录"} · 关联当前母稿`;
       const copy = document.createElement("button"); copy.type = "button"; copy.className = "mini-button"; copy.textContent = "复制全文";
-      copy.addEventListener("click", () => copyPlainText(text, "渠道变体已复制"));
+      copy.addEventListener("click", () => copyPlainText(String(variant.content || ""), "渠道变体已复制"));
       foot.append(meta, copy); article.append(head, preview, foot); els.variantResults.append(article);
     });
   }
@@ -2495,9 +2682,9 @@
   }
 
   async function refreshKnowledgeStats() {
-    els.knowledgeSelectedCount.textContent = String((appState.styleReferences || []).length);
+    els.knowledgeSelectedCount.textContent = String(currentScenario().id === "academic" ? phase2State.academic.records.length : (appState.styleReferences || []).length);
     const groups = extractFacts(els.materials.value);
-    els.knowledgeFactCount.textContent = String(Object.values(groups).reduce((sum, values) => sum + values.length, 0));
+    els.knowledgeFactCount.textContent = String(currentScenario().id === "academic" ? phase2State.academic.evidence.length : Object.values(groups).reduce((sum, values) => sum + values.length, 0));
     const projectId = String(phase2State.project_id || "");
     const operationSerial = projectSwitchSerial;
     const localProject = !projectId || isLocalProject(projectId);
@@ -2510,14 +2697,7 @@
       setV2ServiceState("connected");
     } catch (error) {
       if (error?.name === "AbortError" || projectOperationIsStale(projectId, operationSerial)) return;
-      try {
-        const legacy = await apiRequest("/api/articles?limit=1");
-        if (projectOperationIsStale(projectId, operationSerial)) return;
-        els.knowledgeItemCount.textContent = String(Number(legacy?.total) || (Array.isArray(legacy?.items) ? legacy.items.length : Array.isArray(legacy) ? legacy.length : 0));
-      } catch (legacyError) {
-        if (legacyError?.name === "AbortError" || projectOperationIsStale(projectId, operationSerial)) return;
-        els.knowledgeItemCount.textContent = "本机";
-      }
+      els.knowledgeItemCount.textContent = !projectId ? "未选项目" : "待连接";
     }
   }
 
@@ -2536,58 +2716,20 @@
   }
 
   function renderServiceRecipes(items) {
-    $$(".service-recipe-card", els.recipeCatalog).forEach((node) => node.remove());
-    items.slice(0, 6).forEach((item) => {
-      const article = document.createElement("article"); article.className = "recipe-card service-recipe-card";
-      const top = document.createElement("div"); top.className = "recipe-card-top";
-      const category = document.createElement("span"); category.textContent = "服务端 · 工作流";
-      const badge = document.createElement("b"); badge.textContent = String(item.version || item.status || "V2");
-      top.append(category, badge);
-      const title = document.createElement("h2"); title.textContent = String(item.name || item.title || item.id || "写作工作流");
-      const description = document.createElement("p"); description.textContent = String(item.description || item.summary || "由第二阶段服务提供的可执行写作配方。");
-      const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "载入当前项目";
-      button.addEventListener("click", () => {
-        const packId = String(item.scenario_pack_id || "gongwen");
-        if (RECIPE_CATALOG[packId] && validRecipeId(packId, String(item.id || ""))) {
-          els.briefScenarioPack.value = packId;
-          updateRecipeOptions(String(item.id), false);
-          reconcileTaskContext("recipe");
-        }
-        openSuiteView("projects", { focusId: "briefCard" });
-        toast("服务端配方已载入当前任务", "success");
-      });
-      article.append(top, title, description, button); els.recipeCatalog.append(article);
-    });
+    // Workflow definitions are not recipe IDs. Never pretend an unsupported
+    // workflow card has been loaded as a known writing recipe.
+    renderSceneRecipes();
   }
 
   function applyRecipe(recipeId) {
-    if (recipeId === "parallel-headings") {
-      phase2State.brief.keywords = phase2State.brief.keywords || "排比；结构平行；语义递进";
-      els.briefKeywords.value = phase2State.brief.keywords;
-      selectExpressionFocus("section_heading");
-      els.expressionInstruction.value = "生成四个结构平行、语义递进的小标题，分别回答认识、行动、责任、评价。";
-      openSuiteView("projects", { focusId: "expressionLab" });
-    } else if (recipeId === "briefing-first") {
-      if ([...els.documentType.options].some((option) => option.value === "汇报材料")) els.documentType.value = "汇报材料";
-      els.briefContentType.value = "news-release";
-      els.briefScenarioPack.value = "gongwen";
-      updateRecipeOptions("briefing-material", false);
-      reconcileTaskContext("recipe", { persist: false });
-      appendRequirement("结论前置，每段只承载一个判断；责任、时限紧随行动。 ");
-      handleFormInput(); handlePhase2Input();
-      openSuiteView("projects", { focusId: "briefCard" });
-    } else {
-      els.briefScenarioPack.value = "gongwen";
-      updateRecipeOptions("implementation-plan", false);
-      reconcileTaskContext("recipe", { persist: false });
-      const method = [...els.contentMethodology.options].find((option) => option.value === "universal-problem-solving");
-      if (method) els.contentMethodology.value = method.value;
-      appendRequirement("各级标题结构平行；每段首句先亮明判断或行动；数字与日期均须有材料依据。 ");
-      handleFormInput();
-      openSuiteView("projects", { focusId: "contentMethodology" });
-    }
+    const found = Object.entries(scenarioCatalog.recipes).flatMap(([packId, recipes]) => recipes.map((recipe) => ({ packId, recipe }))).find((item) => item.recipe.id === recipeId);
+    if (!found) { toast("该配方未注册，请从场景目录选择", "warning"); return; }
+    els.briefScenarioPack.value = found.packId;
+    updateRecipeOptions(found.recipe.id, false);
+    reconcileTaskContext("recipe");
+    openSuiteView("projects", { focusId: "scenarioOverview" });
     persistPhase2State();
-    toast("写作配方已载入当前任务", "success");
+    toast(`已采用${scenarioCatalog.profiles[found.packId].name} · ${found.recipe.name}`, "success");
   }
 
   function appendRequirement(text) {
@@ -2597,6 +2739,7 @@
 
   function updatePhase2Summaries() {
     if (!els.homeBriefPreview) return;
+    updateProjectWorkflowStatus();
     const brief = currentBriefPayload();
     const completionFields = [
       ["主题", brief.title !== "未命名写作任务"],
@@ -2626,14 +2769,18 @@
 
     const factGroups = extractFacts(els.materials.value);
     const factCount = Object.values(factGroups).reduce((sum, values) => sum + values.length, 0);
-    els.knowledgeSelectedCount.textContent = String((appState.styleReferences || []).length);
-    els.knowledgeFactCount.textContent = String(factCount);
-    els.variantSourceStatus.textContent = documentPlainText() ? `${countChinese(documentPlainText())} 字母稿已就绪` : "生成或输入母稿后，可一稿多用";
+    els.knowledgeSelectedCount.textContent = String(currentScenario().id === "academic" ? phase2State.academic.records.length : (appState.styleReferences || []).length);
+    els.knowledgeFactCount.textContent = String(currentScenario().id === "academic" ? phase2State.academic.evidence.length : factCount);
+    els.variantSourceStatus.textContent = phase2State.document_stale
+      ? "上一版草稿仅供对照 · 重新生成后可制作变体"
+      : documentPlainText() ? `${countChinese(documentPlainText())} 字母稿已就绪` : "生成或输入母稿后，可一稿多用";
     const documentTitle = els.documentTitle.value.trim() || els.topic.value.trim();
     els.deliveryAssetTitle.textContent = documentTitle || "尚未形成母稿";
-    els.deliveryAssetMeta.textContent = documentPlainText()
-      ? `${els.documentType.value} · ${countChinese(documentPlainText())} 字 · ${phase2State.variants.length} 个渠道变体`
-      : "完成任务简报并生成正文后，交付信息会在这里汇总。";
+    els.deliveryAssetMeta.textContent = phase2State.document_stale
+      ? "上一版草稿 · 按当前任务重新生成后再交付"
+      : documentPlainText()
+        ? `${els.documentType.value} · ${countChinese(documentPlainText())} 字 · ${phase2State.variants.length} 个渠道变体`
+        : "完成任务简报并生成正文后，交付信息会在这里汇总。";
     updateReviewHub();
     updateSettingsOverview();
   }
@@ -2656,17 +2803,32 @@
     const score = currentReviewScore();
     els.hubQualityScore.textContent = score === null ? "—" : String(score);
     els.hubScoreRing.style.setProperty("--hub-score", score || 0);
-    els.reviewHubStatus.textContent = score === null ? (documentPlainText() ? "母稿待审校" : "等待文稿") : score >= 90 ? "整体规范" : score >= 75 ? "建议优化" : "需要完善";
-    els.reviewHubSummary.textContent = score === null ? (documentPlainText() ? "当前母稿已就绪，运行综合审校后查看问题分布。" : "生成或输入母稿后，可在这里启动完整审校。") : appState.review?.summary || "综合审校已完成，请结合证据逐项复核。";
-    els.hubFormatScore.textContent = score === null ? "待检" : score >= 80 ? "良好" : "待优化";
-    els.hubStructureScore.textContent = score === null ? "待检" : Number(appState.review?.metrics?.heading_count || 0) > 0 ? "完整" : "待补充";
+    els.reviewHubStatus.textContent = phase2State.document_stale ? "上一版草稿 · 待重生成" : score === null ? (documentPlainText() ? "母稿待审校" : "等待文稿") : score >= 90 ? "整体规范" : score >= 75 ? "建议优化" : "需要完善";
+    els.reviewHubSummary.textContent = phase2State.document_stale ? "当前编辑区是上一版草稿；请按最新任务重新生成后，再运行综合审校。" : score === null ? (documentPlainText() ? "当前母稿已就绪，运行综合审校后查看问题分布。" : "生成或输入母稿后，可在这里启动完整审校。") : appState.review?.summary || "综合审校已完成，请结合证据逐项复核。";
+    const dimensionIds = sceneReviewDimensionIds();
+    els.hubFormatScore.textContent = score === null ? "待检" : reviewDimensionText(dimensionIds[0]);
+    els.hubStructureScore.textContent = score === null ? "待检" : reviewDimensionText(dimensionIds[1]);
     const factMetrics = appState.factAudit?.metrics || {};
     els.hubFactScore.textContent = !appState.factAudit ? "待检" : Number(factMetrics.contradicted_sentence_count || 0) ? "疑似冲突" : `${Number(factMetrics.evidence_coverage_percent) || 0}% 有依据`;
-    els.hubLanguageScore.textContent = score === null ? "待检" : Number(appState.review?.metrics?.long_sentence_count || 0) ? `${appState.review.metrics.long_sentence_count} 个长句` : "良好";
+    els.hubLanguageScore.textContent = score === null ? "待检" : reviewDimensionText(dimensionIds[3]);
     const coverage = phase2State.academic.coverage;
     const hasCoverage = coverage !== null && coverage !== "" && Number.isFinite(Number(coverage));
-    els.hubCitationScore.textContent = hasCoverage ? `${Math.round(Number(coverage) * (Number(coverage) <= 1 ? 100 : 1))}%` : "学术任务";
+    els.hubCitationScore.textContent = currentScenario().id !== "academic" ? "见事实溯源" : hasCoverage ? `${Math.round(Number(coverage) * (Number(coverage) <= 1 ? 100 : 1))}%` : "待核验";
     renderAcademicIntegrity();
+  }
+
+  function sceneReviewDimensionIds() {
+    return {
+      gongwen: ["format", "logic", "evidence", "language"],
+      workplace: ["clarity", "logic", "evidence", "format"],
+      media: ["audience_tone", "logic", "evidence", "format"],
+      academic: ["logic", "format", "evidence", "language"],
+    }[currentScenario().id];
+  }
+
+  function reviewDimensionText(id) {
+    const dimension = (appState.review?.dimensions || []).find((item) => item.dimension === id);
+    return dimension?.score != null && String(dimension.score).trim() && Number.isFinite(Number(dimension.score)) ? `${dimension.score} 分` : "未单独评分";
   }
 
   function renderAcademicIntegrity() {
@@ -2791,6 +2953,7 @@
       }));
       appState.review = {
         score: Number(review.overall_score),
+        dimensions: review.dimensions,
         summary: [(review.dimensions || []).map((item) => item.summary).filter(Boolean).slice(0, 2).join(" ") || (review.passed ? "六维审校通过。" : "六维审校发现待处理事项。"), integrity ? (integrity.passed ? "学术完整性检查通过。" : "学术引用仍需复核。") : ""].filter(Boolean).join(" "),
         metrics: {
           heading_count: [...els.documentEditor.querySelectorAll("h1,h2,h3,h4,h5,h6")].length,
@@ -2812,6 +2975,7 @@
       else toast(integrity ? "综合审校及学术完整性检查已由项目服务完成" : "基础综合审校已由项目服务完成", "success");
     } catch (error) {
       if (projectOperationIsStale(projectId, operationSerial, error)) return;
+      if (error?.name === "StaleDocumentError") { toast(error.message, "warning"); return; }
       toast(`项目审校失败：${readError(error, "请检查服务")}`, "error");
       if (phase2State.local_draft_mode !== false) {
         const completed = await runReview();
@@ -2852,6 +3016,7 @@
       toast("项目资产已由服务端导出", "success");
     } catch (error) {
       if (projectOperationIsStale(projectId, operationSerial, error)) return;
+      if (error?.name === "StaleDocumentError") { toast(error.message, "warning"); return; }
       toast(`项目资产导出失败：${readError(error, "请检查服务")}`, "error");
       if (phase2State.local_draft_mode !== false) {
         const exported = await exportDocx();
@@ -2864,11 +3029,9 @@
   }
 
   function updateSettingsOverview() {
-    const usingApi = settings.mode === "api";
-    els.settingsEngineTitle.textContent = usingApi ? (settings.modelName || serverProvider.defaultModel || "模型 API") : "本地演示引擎";
-    els.settingsEngineSummary.textContent = usingApi
-      ? "模型请求会发送到你配置或部署者提供的兼容接口；密钥不写入长期浏览器存储。"
-      : "不填写密钥也可体验完整界面；需要真实模型时再主动配置。";
+    const current = currentModelConnection();
+    els.settingsEngineTitle.textContent = current.label;
+    els.settingsEngineSummary.textContent = current.detail;
   }
 
   function clearPhase2Drafts() {
@@ -2909,13 +3072,41 @@
     if (accessTokenRequired) showAccessGate("本机会话已清除，请重新输入访问令牌。");
   }
 
+  const academicOperationSerials = new Map();
+
+  function academicOperationFields(action) {
+    const fields = action === "import"
+      ? ["academicImportFormat", "academicImportContent"]
+      : action === "evidence"
+        ? ["academicEvidenceRecord", "academicEvidenceQuery", "academicEvidenceText"]
+        : [];
+    return JSON.stringify(fields.map((field) => String(els[field]?.value || "")));
+  }
+
+  function captureAcademicOperation(projectId, action) {
+    const requestSerial = (academicOperationSerials.get(action) || 0) + 1;
+    academicOperationSerials.set(action, requestSerial);
+    return { input: captureInputOperation(projectId), action, requestSerial, fields: academicOperationFields(action) };
+  }
+
+  function academicOperationIsStale(operation, error = null) {
+    return academicOperationSerials.get(operation.action) !== operation.requestSerial
+      || operation.fields !== academicOperationFields(operation.action)
+      || inputOperationIsStale(operation.input, error);
+  }
+
+  function finishAcademicOperation(operation, button) {
+    if (academicOperationSerials.get(operation.action) === operation.requestSerial
+      && !projectOperationIsStale(operation.input.projectId, operation.input.projectSerial)) setButtonBusy(button, false);
+  }
+
   async function importAcademicRecords() {
     const content = els.academicImportContent.value.trim();
     if (!content) { els.academicImportContent.focus(); toast("请粘贴参考文献记录", "warning"); return; }
     const format = els.academicImportFormat.value;
     const projectId = requireActiveProject("导入参考文献");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    const inputOperation = captureAcademicOperation(projectId, "import");
     setButtonBusy(els.academicImportButton, true, "正在解析…");
     try {
       const localRecords = normalizeAcademicRecords(parseAcademicRecordsLocally(format, content));
@@ -2924,6 +3115,7 @@
       localRecords.forEach((record) => prospectiveRecords.set(bibliographicIdentity(record), record));
       if (prospectiveRecords.size > MAX_ACADEMIC_RECORDS) throw new Error(`单个项目最多载入 ${MAX_ACADEMIC_RECORDS} 篇参考文献，请拆分为多个项目`);
       const result = await progressiveV2(`/api/v2/projects/${encodeURIComponent(projectId)}/academic/literature/import`, { method: "POST", body: { format, content, tags: [] } }, () => ({ records: localRecords }));
+      if (academicOperationIsStale(inputOperation)) return;
       const rawRecords = result.data?.records || result.data?.items || result.data;
       if (result.source === "server" && (!Array.isArray(rawRecords) || rawRecords.some((record) => !String(record?.id || "").trim() || !String(record?.title || "").trim()))) throw new Error("文献服务没有返回可追溯的记录 ID 与题名");
       const records = normalizeAcademicRecords(rawRecords).map((record) => ({ ...record, _server_synced: result.source === "server" }));
@@ -2946,10 +3138,10 @@
       persistPhase2State();
       toast(result.source === "server" ? `已将 ${records.length} 篇参考文献写入当前项目` : `文献服务写入失败；已按本地预览模式解析 ${records.length} 篇`, result.source === "server" ? "success" : "info");
     } catch (error) {
-      if (projectOperationIsStale(projectId, operationSerial, error)) return;
+      if (academicOperationIsStale(inputOperation, error)) return;
       toast(readError(error, "参考文献导入未完成"), "error");
     } finally {
-      if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicImportButton, false);
+      finishAcademicOperation(inputOperation, els.academicImportButton);
     }
   }
 
@@ -3136,7 +3328,7 @@
     if (!records.length) { toast("请先导入参考文献", "warning"); return; }
     const projectId = requireActiveProject("生成文献矩阵");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    const inputOperation = captureAcademicOperation(projectId, "matrix");
     setButtonBusy(els.academicMatrixButton, true, "正在整理…");
     try {
       const selection = academicEvidenceSelection(MAX_ACADEMIC_RECORDS);
@@ -3145,6 +3337,7 @@
         evidence_ids: selection.evidence_ids,
         query: phase2State.academic.title || phase2State.academic.goal || "",
       } }, () => localAcademicMatrix(records));
+      if (academicOperationIsStale(inputOperation)) return;
       const matrix = result.data?.matrix || result.data || {};
       const rows = Array.isArray(matrix.rows) ? matrix.rows : Array.isArray(matrix.items) ? matrix.items : Array.isArray(matrix) ? matrix : [];
       if (result.source === "server" && !isCanonicalAcademicMatrix(matrix, selection)) throw new Error("文献矩阵服务没有返回可追溯的完整矩阵");
@@ -3152,8 +3345,8 @@
       phase2State.academic.matrix = rows;
       phase2State.academic.matrix_meta = { id: matrix.id || "", query: matrix.query || phase2State.academic.title, themes: Array.isArray(matrix.themes) ? matrix.themes : [] };
       renderAcademicMatrix(); persistPhase2State(); toast(result.source === "server" ? "文献矩阵已保存到当前项目" : "矩阵服务执行失败；已按本地预览模式生成", result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "文献矩阵生成未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicMatrixButton, false); }
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "文献矩阵生成未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicMatrixButton); }
   }
 
   function localAcademicMatrix(records) {
@@ -3224,7 +3417,7 @@
     if (!record) { toast("所选文献记录已变化，请重新选择", "warning"); renderAcademicRecords(); return; }
     const projectId = requireActiveProject("提取文献证据");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    const inputOperation = captureAcademicOperation(projectId, "evidence");
     setButtonBusy(els.academicExtractEvidenceButton, true, "正在提取…");
     try {
       const request = { record_id: recordId, text, query: els.academicEvidenceQuery.value.trim(), max_snippets: 8 };
@@ -3234,6 +3427,7 @@
         : await progressiveV2(`/api/v2/projects/${encodeURIComponent(projectId)}/academic/evidence/extract`, { method: "POST", body: {
         record_id: recordId, text, query: els.academicEvidenceQuery.value.trim(), max_snippets: 8,
       } }, localFallback);
+      if (academicOperationIsStale(inputOperation)) return;
       const rawSnippets = result.data?.snippets || result.data?.items || result.data;
       if (result.source === "server" && (!Array.isArray(rawSnippets) || rawSnippets.some((snippet) => !String(snippet?.id || "").trim()
         || String(snippet?.record_id || "") !== recordId || !String(snippet?.record_source_hash || "").trim()
@@ -3250,8 +3444,8 @@
       phase2State.academic.coverage = null;
       phase2State.academic.integrity = null;
       renderAcademicEvidence(); renderAcademicMatrix(); renderAcademicClaimLinks(); renderAcademicOutline(); renderAcademicIntegrity(); persistPhase2State(); toast(result.source === "server" ? `已写入 ${snippets.length} 条证据片段` : `证据服务执行失败；已按本地预览模式提取 ${snippets.length} 条`, result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "证据提取未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicExtractEvidenceButton, false); }
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "证据提取未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicExtractEvidenceButton); }
   }
 
   function localEvidenceSnippets(record, text, query, maxSnippets) {
@@ -3323,8 +3517,7 @@
     if (!phase2State.academic.records.length || !phase2State.academic.evidence.length) { toast("请先导入文献并提取原文证据", "warning"); return; }
     const projectId = requireActiveProject("核验学术引用");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
-    const inputOperation = captureInputOperation(projectId);
+    const inputOperation = captureAcademicOperation(projectId, "claims");
     setButtonBusy(els.academicVerifyClaimsButton, true, "正在核验…");
     try {
       const selection = academicEvidenceSelection(MAX_ACADEMIC_RECORDS);
@@ -3338,7 +3531,7 @@
         claims,
         links: existingLinks,
       } }, () => localClaimAudit(claims));
-      if (inputOperationIsStale(inputOperation)) return;
+      if (academicOperationIsStale(inputOperation)) return;
       const audit = result.source === "server" ? result.data?.citation_audit : result.data?.citation_audit || result.data?.audit || result.data || {};
       if (!isCanonicalCitationAudit(audit, claims)) throw new Error("引用核验服务返回的计数、覆盖率或链接状态不一致");
       const validatedLinks = validAcademicLinks(audit.links, claims);
@@ -3349,8 +3542,8 @@
       phase2State.academic.claim_comments = normalizeClaimComments(audit.comments, claims, phase2State.academic.claim_links);
       phase2State.academic.coverage = Number(audit.coverage);
       renderAcademicClaimLinks(); persistPhase2State(); toast(result.source === "server" ? "论断—证据核验已写入当前项目" : "引用核验服务执行失败；已按本地预览模式完成候选匹配", result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "论断证据核验未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicVerifyClaimsButton, false); }
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "论断证据核验未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicVerifyClaimsButton); }
   }
 
   function academicClaims() {
@@ -3481,11 +3674,12 @@
     if (!records.length) { toast("请先导入参考文献", "warning"); return; }
     const projectId = requireActiveProject("格式化参考文献");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    const inputOperation = captureAcademicOperation(projectId, "citations");
     setButtonBusy(els.academicFormatCitationsButton, true, "正在格式化…");
     try {
       const style = els.academicCitationStyle.value;
       const result = await progressiveAcademicV2(`/api/v2/projects/${encodeURIComponent(projectId)}/academic/bibliography`, { method: "POST", body: { record_ids: records.map((record) => record.id), style } }, () => ({ items: records.map((record, index) => ({ record_id: record.id, text: formatAcademicReference(record, style, index) })) }), false);
+      if (academicOperationIsStale(inputOperation)) return;
       const raw = Array.isArray(result.data?.items) ? result.data.items : Array.isArray(result.data?.citations) ? result.data.citations : Array.isArray(result.data) ? result.data : [];
       if (result.source === "server" && !raw.length) throw new Error("参考文献服务没有返回格式化条目");
       if (result.source === "server") {
@@ -3504,8 +3698,8 @@
       })).filter((item) => item.text);
       if (result.source === "server" && !phase2State.academic.citations.length) throw new Error("参考文献服务返回的条目缺少正文");
       renderAcademicCitations(); persistPhase2State(); toast(result.source === "server" ? "参考文献表已由项目服务格式化" : "格式化服务执行失败；已按本地预览模式生成", result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "参考文献格式化未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicFormatCitationsButton, false); }
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "参考文献格式化未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicFormatCitationsButton); }
   }
 
   function formatAcademicReference(record, style, index) {
@@ -3532,19 +3726,100 @@
     items.forEach((item) => { const li = document.createElement("li"); li.textContent = item.text; list.append(li); });
     const copy = document.createElement("button"); copy.type = "button"; copy.className = "mini-button"; copy.textContent = "复制参考文献表";
     copy.addEventListener("click", () => copyPlainText(items.map((item) => item.text).join("\n"), "参考文献表已复制"));
-    els.academicCitationOutput.append(list, copy);
+    const append = document.createElement("button"); append.type = "button"; append.className = "mini-button"; append.textContent = "追加参考文献";
+    const projectId = String(phase2State.project_id || "");
+    append.addEventListener("click", () => {
+      if (appendAcademicContent("citations", items, projectId)) append.disabled = true;
+    });
+    els.academicCitationOutput.append(list, copy, append);
+  }
+
+  function academicContentBlocks(kind, value) {
+    if (kind === "citations") {
+      return [{ tag: "h2", text: "参考文献" }, ...value.map((item) => ({ tag: "p", text: String(item.text || "") }))];
+    }
+    if (typeof value === "string") return [{ tag: "h2", text: "研究提纲（待完善）" }, { tag: "p", text: value }];
+    const isAbstract = value.output_kind === "abstract";
+    const blocks = [{ tag: "h2", text: isAbstract ? "研究摘要" : "研究提纲（待完善）" }];
+    if (value.abstract || value.summary) blocks.push({ tag: "p", text: String(value.abstract || value.summary) });
+    const sections = Array.isArray(value.sections) ? value.sections : Array.isArray(value.outline) ? value.outline : Array.isArray(value.items) ? value.items : [];
+    sections.forEach((section) => {
+      blocks.push({ tag: "h3", text: String(typeof section === "string" ? section : section.heading || section.title || "提纲项") });
+      if (section && typeof section === "object") {
+        const guidance = section.guidance || section.purpose || section.description || section.content;
+        if (guidance) blocks.push({ tag: "p", text: String(guidance) });
+        const points = section.points || section.key_points;
+        if (Array.isArray(points)) points.forEach((point) => blocks.push({ tag: "p", text: String(point) }));
+        if (Array.isArray(section.questions) && section.questions.length) blocks.push({ tag: "p", text: `研究问题：${section.questions.join("；")}` });
+      }
+    });
+    if (Array.isArray(value.placeholders) && value.placeholders.length) blocks.push({ tag: "p", text: `待补信息：${value.placeholders.join("；")}` });
+    return blocks;
+  }
+
+  function appendAcademicContent(kind, value, projectId) {
+    const currentValue = kind === "citations" ? phase2State.academic.citations : phase2State.academic.outline;
+    if (String(phase2State.project_id || "") !== projectId || currentValue !== value) {
+      toast("研究结果已变化，请使用当前项目的最新结果", "warning");
+      return false;
+    }
+    if (phase2State.brief.scenario_pack_id !== "academic") {
+      activateScenario("academic");
+      toast("已切换到学术研究场景，请按当前研究任务重新生成结果后再追加", "warning");
+      return false;
+    }
+    const hasDocument = Boolean(els.documentTitle.value.trim() || documentPlainText());
+    if (hasDocument && phase2State.document_stale) {
+      toast("当前保留的是上一版草稿，请先生成当前学术任务的母稿，再追加研究结果", "warning");
+      focusProjectControl("briefCard");
+      return false;
+    }
+    const blocks = academicContentBlocks(kind, value).filter((block) => block.text.trim());
+    if (blocks.length < 2) { toast("研究结果尚无可追加正文，请先补充内容", "warning"); return false; }
+    const fragment = document.createDocumentFragment();
+    blocks.forEach((block) => {
+      const node = document.createElement(block.tag);
+      node.textContent = normalizeGeneratedPunctuation(block.text);
+      fragment.append(node);
+    });
+    if (!hasDocument) {
+      els.documentTitle.value = phase2State.academic.title || els.topic.value.trim() || "研究草稿";
+      appState.document.execution = null;
+      phase2State.document_stale = false;
+    }
+    els.documentEditor.append(fragment);
+    els.generationHero.classList.add("is-hidden");
+    els.documentWorkspace.classList.remove("is-hidden");
+    handleDocumentInput();
+    renderDocumentExecution();
+    focusProjectControl("documentEditor");
+    toast(kind === "citations" ? "参考文献已追加到母稿末尾，请核对正文引文与编号" : "研究结果已追加到母稿末尾，请继续完善论证与原文依据", "success");
+    return true;
+  }
+
+  function selectedAcademicTask() {
+    const tasks = {
+      "literature-review": { documentType: "文献综述", recipeId: "literature-review", label: "文献综述提纲", action: "生成综述提纲" },
+      "research-outline": { documentType: "研究提纲", recipeId: "research-outline", label: "研究提纲", action: "生成研究提纲" },
+      abstract: { documentType: "摘要", recipeId: "research-abstract", label: "研究摘要", action: "生成研究摘要" },
+      rebuttal: { documentType: "审稿回复", recipeId: "reviewer-response", label: "审稿回复", action: "生成逐条回复" },
+    };
+    const requested = els.academicTaskType?.value || phase2State.academic.task_type || "literature-review";
+    const id = tasks[requested] ? requested : "literature-review";
+    return { id, ...tasks[id] };
   }
 
   function academicBriefPayload() {
-    const title = els.topic.value.trim() || phase2State.academic.title || els.academicTitle.value.trim();
-    const question = els.purpose.value.trim() || phase2State.academic.goal || els.academicGoal.value.trim() || title;
+    const title = els.academicTitle.value.trim() || phase2State.academic.title || els.topic.value.trim();
+    const question = els.academicGoal.value.trim() || phase2State.academic.goal || els.purpose.value.trim() || title;
+    const task = selectedAcademicTask();
     return {
       title,
       research_question: question,
       discipline: "",
-      purpose: els.purpose.value.trim() || phase2State.academic.goal || "",
+      purpose: question,
       audience: els.audience.value.trim() || "学术读者",
-      document_type: els.documentType.value || "研究论文",
+      document_type: task.documentType,
       language: phase2State.brief.target_language || "zh-CN",
       keywords: phase2State.brief.keywords.split(/[，,、;；\s]+/).map((item) => item.trim()).filter(Boolean).slice(0, 30),
       constraints: boundedTextList([els.requirements.value, phase2State.brief.constraints], 500, 32),
@@ -3555,27 +3830,30 @@
 
   function updateAcademicPrimaryAction() {
     if (!els.academicOutlineButton) return;
-    els.academicOutlineButton.textContent = els.academicTaskType.value === "abstract" ? "生成研究摘要" : "基于证据生成";
+    els.academicOutlineButton.textContent = selectedAcademicTask().action;
   }
 
   async function generateAcademicOutline() {
+    const task = selectedAcademicTask();
+    if (task.id === "rebuttal") { await generateAcademicRebuttal(); return; }
     if (!els.academicTitle.value.trim()) { els.academicTitle.focus(); toast("请先填写题目或研究问题", "warning"); return; }
     if (!phase2State.academic.records.length) { toast("请先导入真实参考文献", "warning"); return; }
     const projectId = requireActiveProject("生成研究提纲");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    syncPhase2StateFromUI();
+    const inputOperation = captureAcademicOperation(projectId, "outline");
     setButtonBusy(els.academicOutlineButton, true, "正在生成…");
     try {
-      syncPhase2StateFromUI();
-      const isAbstract = phase2State.academic.task_type === "abstract";
+      const isAbstract = task.id === "abstract";
       const claims = academicClaims();
       const links = academicCandidateLinks(claims, 1000);
       const academicBase = `/api/v2/projects/${encodeURIComponent(projectId)}/academic`;
       const path = isAbstract ? `${academicBase}/abstract` : `${academicBase}/outline`;
       const body = isAbstract
-        ? { ...academicBriefPayload(), claims, links, max_characters: 800 }
-        : { ...academicBriefPayload(), evidence_ids: phase2State.academic.evidence.map((item) => item.id).slice(0, 1000) };
+        ? { ...academicBriefPayload(), document_type: task.documentType, claims, links, max_characters: 800 }
+        : { ...academicBriefPayload(), document_type: task.documentType, evidence_ids: phase2State.academic.evidence.map((item) => item.id).slice(0, 1000) };
       const result = await progressiveAcademicV2(path, { method: "POST", body }, isAbstract ? () => ({ abstract: localAcademicAbstract(claims) }) : localAcademicOutline);
+      if (academicOperationIsStale(inputOperation)) return;
       if (result.source === "server") {
         const valid = isAbstract
           ? isCanonicalAcademicAbstract(result.data?.abstract, body)
@@ -3583,19 +3861,22 @@
         if (!valid) throw new Error(isAbstract ? "摘要服务没有返回可追溯的完整正文" : "研究提纲服务没有返回可追溯的完整结构");
       }
       const abstractDraft = isAbstract ? result.data?.abstract || result.data : null;
+      const rawOutline = result.data?.outline || result.data;
       const outline = isAbstract
-        ? { title: "研究摘要", abstract: String(abstractDraft?.text || ""), record_ids: abstractDraft?.record_ids || [], claim_ids: abstractDraft?.claim_ids || [], placeholders: abstractDraft?.placeholders || [], output_kind: "abstract" }
-        : result.data?.outline || result.data;
+        ? { title: els.academicTitle.value.trim(), abstract: String(abstractDraft?.text || ""), record_ids: abstractDraft?.record_ids || [], claim_ids: abstractDraft?.claim_ids || [], placeholders: abstractDraft?.placeholders || [], output_kind: "abstract", task_type: task.id }
+        : typeof rawOutline === "string"
+          ? { title: els.academicTitle.value.trim(), summary: rawOutline, sections: [], task_type: task.id }
+          : { ...rawOutline, task_type: task.id };
       const hasOutline = typeof outline === "string" ? Boolean(outline.trim()) : Boolean(outline && typeof outline === "object" && (outline.title || (Array.isArray(outline.sections) && outline.sections.length)));
       if (result.source === "server" && (!hasOutline || (isAbstract && !outline.abstract))) throw new Error(isAbstract ? "摘要服务没有返回可用正文" : "研究提纲服务没有返回可用内容");
       phase2State.academic.outline = outline;
-      renderAcademicOutline(); persistPhase2State(); toast(result.source === "server" ? (isAbstract ? "研究摘要已由项目服务生成" : "研究提纲已由项目服务生成") : `${isAbstract ? "摘要" : "提纲"}服务执行失败；已按本地预览模式生成`, result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "学术写作生成未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicOutlineButton, false); }
+      renderAcademicOutline(); persistPhase2State(); toast(result.source === "server" ? `${task.label}已由项目服务生成` : `${task.label}服务执行失败；已按本地预览模式生成`, result.source === "server" ? "success" : "info");
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "学术写作生成未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicOutlineButton); }
   }
 
   function isCanonicalAcademicOutline(outline, requestBody) {
-    return Boolean(responseValidators?.validateAcademicOutline?.(outline, {
+    return (!outline?.task_type || outline.task_type === selectedAcademicTask().id) && Boolean(responseValidators?.validateAcademicOutline?.(outline, {
       recordIds: requestBody.record_ids || [],
     }));
   }
@@ -3609,18 +3890,21 @@
 
   function localAcademicOutline() {
     const topic = phase2State.academic.title || "研究主题";
+    const task = selectedAcademicTask();
+    const recipe = workspaceContext.findRecipe("academic", task.recipeId);
+    const methodology = recipe?.[4]?.methodology;
     const themes = phase2State.academic.matrix_meta?.themes || uniqueAcademicThemes(phase2State.academic.records);
     return {
       title: topic,
-      abstract: `围绕“${topic}”建立研究问题、文献比较和证据核验框架。当前已导入 ${phase2State.academic.records.length} 篇文献、提取 ${phase2State.academic.evidence.length} 条证据；具体发现应依据原文逐项补充。`,
-      sections: [
-        { heading: "一、问题提出与研究边界", guidance: "界定核心概念、研究对象、时间范围与需要回答的问题。" },
-        { heading: "二、文献脉络与理论对话", guidance: themes.length ? `围绕${themes.slice(0, 5).join("、")}等主题比较既有研究。` : "按研究主题、方法和结论差异组织文献矩阵。" },
-        { heading: "三、研究设计与证据来源", guidance: "说明材料范围、研究方法与证据筛选标准，不补写未提供的方法信息。" },
-        { heading: "四、分析结果", guidance: "每项核心论断链接真实文献 ID 与原文证据片段，区分事实、解释和推断。" },
-        { heading: "五、讨论、局限与贡献", guidance: "与既有研究对话，说明适用边界、证据局限和可验证的增量价值。" },
-        { heading: "六、结论", guidance: "回答研究问题，并列出仍需补充证据的论断。" },
-      ],
+      task_type: task.id,
+      summary: `围绕“${topic}”整理${task.label}。当前已导入 ${phase2State.academic.records.length} 篇文献、提取 ${phase2State.academic.evidence.length} 条证据；结构来自所选写作配方，具体论证仍需依据原文补充。`,
+      record_ids: phase2State.academic.records.map((record) => record.id),
+      sections: (methodology?.headings || []).map((heading, index) => ({
+        heading,
+        guidance: heading === "主题脉络" && themes.length
+          ? `围绕${themes.slice(0, 5).join("、")}等主题比较既有文献，不逐篇堆砌摘要。`
+          : methodology.section_purposes[index] || "请补充本节的可定位依据与论证。",
+      })),
     };
   }
 
@@ -3642,9 +3926,12 @@
     els.academicOutline.replaceChildren();
     els.academicOutline.classList.toggle("is-empty", !outline);
     if (!outline) { const p = document.createElement("p"); p.textContent = "题目、摘要与提纲将在这里生成"; els.academicOutline.append(p); return; }
-    if (typeof outline === "string") { const p = document.createElement("p"); p.className = "outline-long-text"; p.textContent = outline; els.academicOutline.append(p); return; }
+    if (typeof outline === "string") { const p = document.createElement("p"); p.className = "outline-long-text"; p.textContent = outline; els.academicOutline.append(p); appendAcademicOutlineAction(outline); return; }
     const title = document.createElement("h3"); title.textContent = String(outline.title || phase2State.academic.title || "研究提纲");
     els.academicOutline.append(title);
+    const taskLabels = { "literature-review": "文献综述提纲", "research-outline": "研究提纲", abstract: "研究摘要", rebuttal: "审稿回复", "research-paper": "研究论文提纲" };
+    const taskLabel = taskLabels[outline.task_type || outline.output_kind];
+    if (taskLabel) { const label = document.createElement("small"); label.className = "academic-placeholder-note"; label.textContent = `${taskLabel} · 本地规则整理`; els.academicOutline.append(label); }
     if (outline.abstract || outline.summary) { const abstract = document.createElement("p"); abstract.className = "academic-abstract"; abstract.textContent = String(outline.abstract || outline.summary); els.academicOutline.append(abstract); }
     if (Array.isArray(outline.placeholders) && outline.placeholders.length) {
       const notice = document.createElement("small"); notice.className = "academic-placeholder-note"; notice.textContent = `待补信息：${outline.placeholders.join("；")}`; els.academicOutline.append(notice);
@@ -3666,6 +3953,16 @@
       });
       els.academicOutline.append(list);
     }
+    appendAcademicOutlineAction(outline);
+  }
+
+  function appendAcademicOutlineAction(outline) {
+    const append = document.createElement("button"); append.type = "button"; append.className = "mini-button"; append.textContent = "放入当前母稿";
+    const projectId = String(phase2State.project_id || "");
+    append.addEventListener("click", () => {
+      if (appendAcademicContent("outline", outline, projectId)) append.disabled = true;
+    });
+    els.academicOutline.append(append);
   }
 
   async function generateAcademicRebuttal() {
@@ -3673,7 +3970,7 @@
     if (!commentTexts.length) { els.academicReviewerComments.focus(); toast("请先填写审稿意见", "warning"); return; }
     const projectId = requireActiveProject("生成审稿回复");
     if (!projectId) return;
-    const operationSerial = projectSwitchSerial;
+    const inputOperation = captureAcademicOperation(projectId, "rebuttal");
     const comments = commentTexts.map((message, index) => ({
       id: `review-${simpleHash(`${index}|${message}`)}`,
       category: "style",
@@ -3691,6 +3988,7 @@
       const changes = els.academicManuscriptChanges.value.trim();
       const changeMap = changes ? Object.fromEntries(comments.map((comment) => [comment.id, changes])) : {};
       const result = await progressiveV2(`/api/v2/projects/${encodeURIComponent(projectId)}/academic/rebuttal`, { method: "POST", body: { comments, changes: changeMap } }, () => ({ items: localRebuttal(commentTexts, changes) }));
+      if (academicOperationIsStale(inputOperation)) return;
       const raw = Array.isArray(result.data?.items) ? result.data.items : Array.isArray(result.data?.responses) ? result.data.responses : Array.isArray(result.data) ? result.data : [];
       if (result.source === "server" && !raw.length) throw new Error("审稿回复服务没有返回可用条目");
       phase2State.academic.rebuttal = raw.map((item, index) => typeof item === "string" ? { comment: commentTexts[index] || `意见 ${index + 1}`, response: item, change_location: "" } : {
@@ -3703,8 +4001,8 @@
         phase2State.academic.rebuttal = localRebuttal(commentTexts, changes);
       }
       renderAcademicRebuttal(); persistPhase2State(); toast(result.source === "server" ? "逐条审稿回复已由项目服务生成" : "回复服务执行失败；已按本地预览模式生成", result.source === "server" ? "success" : "info");
-    } catch (error) { if (!projectOperationIsStale(projectId, operationSerial, error)) toast(readError(error, "审稿回复生成未完成"), "error"); }
-    finally { if (!projectOperationIsStale(projectId, operationSerial)) setButtonBusy(els.academicRebuttalButton, false); }
+    } catch (error) { if (!academicOperationIsStale(inputOperation, error)) toast(readError(error, "审稿回复生成未完成"), "error"); }
+    finally { finishAcademicOperation(inputOperation, els.academicRebuttalButton); }
   }
 
   function splitReviewerComments(value) {
@@ -3755,7 +4053,10 @@
       configurePeopleSearch(Boolean(data.capabilities?.people_auto_discovery));
       updateDeploymentStatus();
       if (Array.isArray(data.document_types) && data.document_types.length) {
+        const selectedDocumentType = appState.form.document_type;
         replaceOptions(els.documentType, data.document_types);
+        ensureDocumentTypeOption(selectedDocumentType);
+        els.documentType.value = selectedDocumentType;
         reconcileTaskContext("restore", { invalidate: false, persist: false, reloadMethodology: false });
       }
       if (Array.isArray(data.lengths) && data.lengths.length) replaceOptions(els.length, data.lengths.map((item) => ({ value: normalizeLength(typeof item === "string" ? item : item.value), label: typeof item === "string" ? item : item.label })));
@@ -3770,6 +4071,12 @@
       return true;
     } catch (error) {
       setConnection(false);
+      if (!methodologyCatalogReady) {
+        methodologyCatalog = fallbackMethodologyCatalog(els.documentType.value || appState.form.document_type);
+        mergeActiveRecipeMethodology();
+        methodologyCatalogReady = true;
+        renderMethodologyCatalog(false);
+      }
       console.info("Bootstrap unavailable; the saved interface remains usable.", error);
       return false;
     }
@@ -3942,16 +4249,8 @@
   }
 
   function generationMethodologyPayload() {
-    const recipeMethod = activeRecipeMethodology();
-    if (els.contentMethodology.value === recipeMethod.id) {
-      return {
-        name: recipeMethod.name,
-        summary: recipeMethod.summary,
-        logic: recipeMethod.logic,
-        steps: recipeMethod.headings,
-        fact_strategy: recipeMethod.fact_strategy,
-      };
-    }
+    // Built-in recipes are resolved by ID on the server. Treating them as custom
+    // structures loses their scenario-specific section semantics.
     return customMethodologyPayload();
   }
 
@@ -3965,6 +4264,7 @@
   }
 
   async function generateDocument() {
+    if (!requireModelConnection()) return false;
     syncFormState();
     if (!appState.form.topic.trim()) {
       els.topic.focus();
@@ -3986,6 +4286,7 @@
       if (documentPlainText()) createSnapshot("生成前的版本", false);
       const payload = {
         ...appState.form,
+        materials: currentFactualMaterialText(),
         custom_methodology: methodologyCatalogReady
           ? generationMethodologyPayload()
           : appState.form.custom_methodology,
@@ -4002,6 +4303,7 @@
         || Array.isArray(result?.outline) && result.outline.some((item) => String(item?.content || "").trim());
       if (!hasGeneratedBody) throw new Error("生成服务没有返回可用正文");
       applyGeneratedDocument(result);
+      focusProjectControl("documentExecution");
       createSnapshot("生成初稿", false);
       toast("初稿已生成，可继续逐段修改", "success");
       return true;
@@ -4015,6 +4317,7 @@
   }
 
   async function refreshTitleCandidates() {
+    if (!requireModelConnection()) return;
     syncFormState();
     if (!appState.form.topic.trim()) { els.topic.focus(); toast("请先填写写作主题", "warning"); return; }
     const formulaIds = selectedTitleFormulaIds();
@@ -4038,7 +4341,7 @@
         topic: appState.form.topic,
         purpose: appState.form.purpose,
         audience: appState.form.audience,
-        materials: appState.form.materials,
+        materials: currentFactualMaterialText(),
         tone: appState.form.tone,
         reference_style: appState.form.reference_style,
         style_references: appState.styleReferences,
@@ -4053,6 +4356,7 @@
       const candidates = normalizeCandidates(result.candidates || result.title_candidates || result.titles || [], result.recommended_title || result.title);
       if (!candidates.length) throw new Error("标题服务没有返回可用候选");
       appState.document.candidates = candidates;
+      appState.document.title_execution = executionMode.execution(result);
       if (!appState.document.title) {
         appState.document.title = String(result.recommended_title || appState.document.candidates[0]?.title || "");
         els.documentTitle.value = appState.document.title;
@@ -4061,7 +4365,7 @@
         renderDocumentContextStatus();
         updateProjectWorkflowStatus();
       }
-      renderCandidates(); scheduleSave(); schedulePhase2Save(); toast("标题已生成并按评分排序", "success");
+      renderCandidates(); scheduleSave(); schedulePhase2Save(); toast(`标题已生成 · ${executionMode.execution(result)?.label || "来源未注明"}`, "success");
     } catch (error) { if (!inputOperationIsStale(inputOperation, error)) toast(readError(error, "标题生成失败"), "error"); }
     finally {
       setButtonBusy(els.refreshTitlesButton, false);
@@ -4074,7 +4378,8 @@
     const candidates = normalizeCandidates(result.title_candidates || result.titles || [], result.title);
     const outline = normalizeOutline(result.outline || []);
     const title = String(result.title || candidates[0]?.title || appState.form.topic);
-    appState.document = { title, candidates, outline, html: "" };
+    appState.document = { title, candidates, outline, html: "", execution: executionMode.execution(result), title_execution: executionMode.execution(result) };
+    renderDocumentExecution();
     invalidateDocumentDerivedState();
     els.documentTitle.value = title;
     renderContent(result.content, outline);
@@ -4096,13 +4401,15 @@
 
   function renderContent(content, outline) {
     const fragment = document.createDocumentFragment();
+    const headingKey = (text) => String(text || "").trim().replace(/^#{1,6}\s+/, "").replace(/\s+/g, " ");
+    const outlineHeadings = new Set(outline.map((item) => headingKey(item.heading)));
     const source = String(content || "").trim();
     const lines = source ? source.split(/\n+/).map((line) => line.trim()).filter(Boolean) : [];
     if (!lines.length && outline.length) {
       outline.forEach((item) => lines.push(item.heading, item.content));
     }
     lines.forEach((line, index) => {
-      const isHeading = /^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[.、])/.test(line);
+      const isHeading = outlineHeadings.has(headingKey(line)) || /^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[.、])/.test(line);
       const node = document.createElement(isHeading ? "h2" : "p");
       node.textContent = line;
       if (isHeading) node.id = `section-${index}`;
@@ -4112,6 +4419,9 @@
   }
 
   function renderCandidates() {
+    if (els.titleExecution) els.titleExecution.textContent = appState.document.candidates?.length
+      ? `${executionMode.execution(appState.document.title_execution)?.label || "候选来源未记录"} · 分数仅作写法参考`
+      : "候选将按综合评分由高到低排列；分数仅作写法参考";
     els.titleCandidates.replaceChildren();
     const candidates = sortedTitleCandidates(appState.document.candidates);
     els.titleCandidates.classList.toggle("is-empty", !candidates.length);
@@ -4189,14 +4499,15 @@
   }
 
   async function runReview() {
+    if (!requireModelConnection()) return false;
     const content = documentPlainText();
     if (!content) { toast("请先生成或输入正文", "warning"); return false; }
     const inputOperation = captureInputOperation();
     showLoading("正在检查文稿", "核对结构、表达、事实与待补信息……");
     try {
       const [reviewResult, auditResult] = await Promise.allSettled([
-        apiRequest("/api/review", { method: "POST", body: { title: els.documentTitle.value.trim(), content, document_type: els.documentType.value, materials: els.materials.value, live: settings.mode === "api", provider: providerPayload() } }),
-        apiRequest("/api/fact-audit", { method: "POST", body: { title: els.documentTitle.value.trim(), content, materials: els.materials.value } }),
+        apiRequest("/api/review", { method: "POST", body: { title: els.documentTitle.value.trim(), content, document_type: els.documentType.value, materials: currentFactualMaterialText(), live: settings.mode === "api", provider: providerPayload() } }),
+        apiRequest("/api/fact-audit", { method: "POST", body: { title: els.documentTitle.value.trim(), content, materials: currentFactualMaterialText() } }),
       ]);
       if (inputOperationIsStale(inputOperation)) return false;
       const validReview = reviewResult.status === "fulfilled" && isValidLegacyReview(reviewResult.value);
@@ -4259,13 +4570,9 @@
       && candidate.message === issue.message && candidate.suggestion === issue.suggestion) === index);
     const hasFactConflict = Number(auditMetrics.contradicted_sentence_count || 0) > 0;
     const unverifiedFacts = (Number(auditMetrics.unverified_sentence_count) || 0) + (Number(auditMetrics.partial_sentence_count) || 0);
-    const factMetric = !els.materials.value.trim() ? "未核验" : !appState.factAudit ? "待重试" : hasFactConflict ? "疑似冲突" : unverifiedFacts ? `${unverifiedFacts}项待核` : "通过";
-    const metricItems = [
-      ["格式规范", score >= 80 ? "良好" : "待优化"],
-      ["结构完整", Number(review.metrics?.heading_count || 0) > 0 ? "完整" : "待补充"],
-      ["事实一致", factMetric],
-      ["语言精炼", Number(review.metrics?.long_sentence_count || 0) === 0 ? "良好" : `${review.metrics.long_sentence_count}个长句`],
-    ];
+    const factMetric = !currentFactualMaterialText().trim() ? "未核验" : !appState.factAudit ? "待重试" : !Number(auditMetrics.claim_sentence_count) ? "无待核陈述" : hasFactConflict ? "疑似冲突" : unverifiedFacts ? `${unverifiedFacts}项待核` : "有材料依据";
+    const dimensionIds = sceneReviewDimensionIds();
+    const metricItems = currentScenario().review_dimensions.map((label, index) => [label, index === 2 ? factMetric : reviewDimensionText(dimensionIds[index])]);
     els.qualityMetrics.replaceChildren(...metricItems.map(([label, value]) => {
       const row = document.createElement("div"); const span = document.createElement("span"); const b = document.createElement("b");
       span.textContent = label; b.textContent = value; row.append(span, b); return row;
@@ -4332,9 +4639,9 @@
     els.scoreRing.style.setProperty("--score", 0);
     els.qualityTitle.textContent = "部分检查完成";
     els.qualitySummary.textContent = message;
-    els.qualityMetrics.replaceChildren(...["格式规范", "结构完整", "事实一致", "语言精炼"].map((label) => {
+    els.qualityMetrics.replaceChildren(...currentScenario().review_dimensions.map((label, index) => {
       const row = document.createElement("div"); const span = document.createElement("span"); const value = document.createElement("b");
-      span.textContent = label; value.textContent = label === "事实一致" && appState.factAudit ? `${appState.factAudit.metrics?.evidence_coverage_percent || 0}% 有依据` : "待重试";
+      span.textContent = label; value.textContent = index === 2 && appState.factAudit ? `${appState.factAudit.metrics?.evidence_coverage_percent || 0}% 有依据` : "待重试";
       row.append(span, value); return row;
     }));
     els.issueCount.textContent = "0 条";
@@ -4367,8 +4674,17 @@
   async function apiRequest(path, { method = "GET", body } = {}) {
     const options = { method, headers: requestHeaders({ Accept: "application/json" }) };
     if (String(path).startsWith("/api/v2/projects/") || (phase2State.project_id && method !== "GET")) options.signal = projectRequestController.signal;
+    const timeoutSignal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(method === "GET" ? 15000 : 300000) : null;
+    if (timeoutSignal) options.signal = options.signal && typeof AbortSignal.any === "function"
+      ? AbortSignal.any([options.signal, timeoutSignal]) : options.signal || timeoutSignal;
     if (body !== undefined) { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
-    const response = await fetch(path, options);
+    let response;
+    try { response = await fetch(path, options); }
+    catch (error) {
+      if (error?.name !== "AbortError") setConnection(false);
+      if (error?.name === "TimeoutError") throw new Error("服务响应超时，请检查连接后重试");
+      throw error;
+    }
     if (!response.ok) {
       const error = await responseError(response);
       if (response.status === 401 && accessTokenRequired) {
@@ -4377,7 +4693,9 @@
       }
       throw error;
     }
-    return response.json();
+    const result = await response.json();
+    if (serviceConnected === false) setConnection(true);
+    return result;
   }
 
   function requestHeaders(base = {}) {
@@ -5014,29 +5332,19 @@
   }
 
   function loadExample() {
-    els.documentType.value = EXAMPLE.document_type;
-    els.topic.value = EXAMPLE.topic;
-    els.purpose.value = EXAMPLE.purpose;
-    els.audience.value = EXAMPLE.audience;
-    els.length.value = EXAMPLE.length;
-    els.referenceStyle.value = EXAMPLE.reference_style;
-    els.requirements.value = EXAMPLE.requirements;
-    els.materials.value = EXAMPLE.materials;
-    const tone = $(`input[name="tone"][value="${EXAMPLE.tone}"]`); if (tone) tone.checked = true;
-    els.briefContentType.value = "official-document";
-    els.briefScenarioPack.value = "gongwen";
-    updateRecipeOptions("work-summary", false);
+    const scene = currentScenario();
+    if (documentPlainText()) createSnapshot("填写示例前的版本", false);
+    const example = scene.example;
+    ["topic", "purpose", "audience", "requirements", "materials"].forEach((field) => { els[field].value = example[field] || ""; });
+    els.briefKeywords.value = example.keywords || "";
+    els.briefConstraints.value = "";
+    appState.styleCustom = false;
     const context = reconcileTaskContext("recipe", { invalidate: false, persist: false });
-    syncFormState();
-    syncPhase2StateFromUI({ invalidate: false });
-    clearTaskDerivedOutputs(context, { discardDraft: true });
-    invalidateSavedBriefBinding();
-    updateCounts();
-    updateFacts();
-    updatePhase2Summaries();
-    scheduleSave();
-    schedulePhase2Save();
-    toast("示例材料已填入，点击“生成公文初稿”查看效果", "success");
+    syncFormState(); syncPhase2StateFromUI({ invalidate: false });
+    clearTaskDerivedOutputs(context);
+    invalidateSavedBriefBinding(); updateCounts(); updateFacts(); updatePhase2Summaries();
+    scheduleSave(); schedulePhase2Save();
+    toast(`${scene.name}示例已填入；原稿保留供对照，重新生成后再交付。`, "success");
   }
 
   async function importMaterialFile() {
@@ -5164,15 +5472,18 @@
   }
 
   async function rewriteSelection(mode, instruction = "") {
+    if (!requireModelConnection()) return;
     if (!savedSelection || !savedSelection.toString().trim()) { toast("请先选中需要改写的文字", "warning"); return; }
     const range = savedSelection.cloneRange();
     const text = range.toString();
     if (mode === "custom" && !instruction.trim()) { els.rewriteInstruction.focus(); return; }
     if (els.rewriteModal.open) els.rewriteModal.close();
+    const inputOperation = captureInputOperation();
     hideSelectionToolbar();
     showLoading("正在改写选中内容", "保持事实不变，调整表达和句式……");
     try {
-      const result = await apiRequest("/api/rewrite", { method: "POST", body: { text, instruction: instruction || rewriteInstruction(mode), mode, tone: appState.form.tone, live: settings.mode === "api", provider: providerPayload() } });
+      const result = await apiRequest("/api/rewrite", { method: "POST", body: { text, document_type: els.documentType.value, instruction: instruction || rewriteInstruction(mode), mode, tone: appState.form.tone, live: settings.mode === "api", provider: providerPayload() } });
+      if (inputOperationIsStale(inputOperation)) return;
       if (!result || typeof result !== "object" || !String(result.text || "").trim()) throw new Error("改写服务没有返回有效正文");
       if (!els.documentEditor.contains(range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement)) throw new Error("原文已发生变化，请重新选择");
       range.deleteContents();
@@ -5186,14 +5497,14 @@
   }
 
   function rewriteInstruction(mode) {
-    return { polish: "提升表达的规范性、准确性和流畅度", concise: "删除重复和铺垫，保留全部事实并精简表达", expand: "围绕原意适度扩写，补充落实抓手但不新增事实数据", formal: "调整为严谨规范的公文语气" }[mode] || "优化表达";
+    return { polish: "提升表达的准确性和流畅度，保持当前场景与目标读者一致", concise: "删除重复和铺垫，保留全部事实并精简表达", expand: "围绕原意适度扩写，补充解释但不新增事实数据或研究结论", formal: `调整为适合${currentScenario().name}的专业表达，保持原意和事实边界` }[mode] || "优化表达";
   }
 
   function resetReviewView() {
     renderFactAudit();
     els.qualityScore.textContent = "—"; els.scoreRing.style.setProperty("--score", 0);
     els.qualityTitle.textContent = "文稿已更新"; els.qualitySummary.textContent = "请重新运行检查，以获取最新结果。";
-    els.qualityMetrics.replaceChildren(...["格式规范", "结构完整", "事实一致", "语言精炼"].map((label) => {
+    els.qualityMetrics.replaceChildren(...currentScenario().review_dimensions.map((label) => {
       const row = document.createElement("div"); const span = document.createElement("span"); const value = document.createElement("b"); span.textContent = label; value.textContent = "待检"; row.append(span, value); return row;
     }));
     els.issueCount.textContent = "0 条";
@@ -5257,19 +5568,30 @@
 
   function updateDeploymentStatus() {
     if (els.accessSettings) els.accessSettings.hidden = !accessTokenRequired;
-    if (els.serverProviderCard) els.serverProviderCard.hidden = !serverProvider.configured;
+    if (els.serverProviderCard) els.serverProviderCard.hidden = false;
+    els.serverProviderTitle.textContent = serverProvider.configured ? `服务端模型：${serverProvider.defaultModel || "模型名称未返回"}` : "服务端尚未配置模型";
+    els.serverProviderDetail.textContent = serverProvider.configured
+      ? `${serverProvider.providerName || "供应商未返回"} · API 模式下，将页面接口、模型和密钥留空即可使用该服务端连接。项目工作流也使用此连接。配置就绪不等于已通过连接测试。`
+      : "当前没有服务端模型。可在下方填写页面临时连接用于单篇写作；项目母稿与变体的真实调用需先配置服务器模型。";
     if (serverProvider.configured && !settings.modelName && serverProvider.defaultModel) {
       els.modelName.placeholder = `服务端默认：${serverProvider.defaultModel}`;
     }
   }
 
   function openDrawer(drawer) {
+    drawerReturnFocus = document.activeElement;
     els.drawerBackdrop.hidden = false;
-    requestAnimationFrame(() => { els.drawerBackdrop.classList.add("is-visible"); drawer.classList.add("is-open"); drawer.setAttribute("aria-hidden", "false"); });
+    requestAnimationFrame(() => {
+      els.drawerBackdrop.classList.add("is-visible"); drawer.classList.add("is-open");
+      drawer.inert = false; drawer.setAttribute("aria-hidden", "false");
+      $('button, input, select', drawer)?.focus();
+    });
   }
 
   function closeDrawers() {
-    [els.settingsDrawer, els.historyDrawer].forEach((drawer) => { drawer.classList.remove("is-open"); drawer.setAttribute("aria-hidden", "true"); });
+    const hadOpenDrawer = [els.settingsDrawer, els.historyDrawer].some((drawer) => drawer.classList.contains("is-open"));
+    [els.settingsDrawer, els.historyDrawer].forEach((drawer) => { drawer.classList.remove("is-open"); drawer.inert = true; drawer.setAttribute("aria-hidden", "true"); });
+    if (hadOpenDrawer && drawerReturnFocus?.isConnected) drawerReturnFocus.focus({ preventScroll: true });
     els.drawerBackdrop.classList.remove("is-visible");
     setTimeout(() => { if (!els.settingsDrawer.classList.contains("is-open") && !els.historyDrawer.classList.contains("is-open")) els.drawerBackdrop.hidden = true; }, 220);
   }
@@ -5289,12 +5611,18 @@
     els.apiSettings.classList.toggle("is-disabled", mode !== "api");
     $$('input, select, button', els.apiSettings).forEach((control) => { control.disabled = mode !== "api"; });
     if (mode === "api" && serverProvider.configured) {
-      els.providerTestStatus.textContent = "服务端模型配置已就绪；页面字段留空即可使用默认配置。";
+      els.providerTestStatus.textContent = `服务端配置：${serverProvider.providerName} · ${serverProvider.defaultModel}；页面字段留空即使用它。测试连接会发起一次最小模型请求。`;
     }
   }
 
   async function testProviderConnection() {
+    const operation = ++providerTestSerial;
     const provider = providerPayloadFromForm();
+    if (provider && (!provider.model || !provider.api_key)) {
+      toast("页面临时连接请同时填写模型名称和本页密钥；使用服务端默认连接时请清空这三项。", "warning");
+      (!provider.model ? els.modelName : els.apiKey).focus();
+      return;
+    }
     if (!provider && !serverProvider.configured) { els.modelName.focus(); toast("请先填写模型名称", "warning"); return; }
     if (provider && !provider.model && !serverProvider.configured) { els.modelName.focus(); toast("请先填写模型名称", "warning"); return; }
     if (provider && els.providerName.value !== "openai" && !provider.base_url && !serverProvider.configured) { els.baseUrl.focus(); toast("请填写该兼容服务的接口地址", "warning"); return; }
@@ -5303,15 +5631,18 @@
     setButtonBusy(els.testProviderButton, true, "正在测试…");
     try {
       const result = await apiRequest("/api/provider/test", { method: "POST", body: provider ? { provider } : {} });
+      if (operation !== providerTestSerial) return;
       els.providerTestStatus.className = "connection-test success";
       els.providerTestStatus.textContent = `${result.message || "连接成功"}${result.meta?.model ? ` · ${result.meta.model}` : ""}`;
     } catch (error) {
+      if (operation !== providerTestSerial) return;
       els.providerTestStatus.className = "connection-test error";
       els.providerTestStatus.textContent = readError(error, "连接测试失败");
     } finally { setButtonBusy(els.testProviderButton, false); }
   }
 
   function resetProviderTestStatus() {
+    providerTestSerial += 1;
     els.providerTestStatus.className = "connection-test";
     els.providerTestStatus.textContent = "设置已变更，请重新测试连接。";
   }
@@ -5320,10 +5651,17 @@
     const mode = $('input[name="engineMode"]:checked')?.value || "demo";
     if (mode === "api" && !serverProvider.configured && !els.modelName.value.trim()) { els.modelName.focus(); toast("请填写模型名称", "warning"); return; }
     if (mode === "api" && !serverProvider.configured && els.providerName.value !== "openai" && !els.baseUrl.value.trim()) { els.baseUrl.focus(); toast("请填写该服务商的接口地址", "warning"); return; }
+    const hasClientFields = Boolean(els.baseUrl.value.trim() || els.modelName.value.trim() || els.apiKey.value.trim());
+    if (mode === "api" && hasClientFields && (!els.modelName.value.trim() || !els.apiKey.value.trim())) {
+      toast("页面临时连接请同时填写模型名称和本页密钥；使用服务端默认连接时请清空这三项。", "warning");
+      (!els.modelName.value.trim() ? els.modelName : els.apiKey).focus();
+      return;
+    }
+    modelSettingsSerial += 1;
     sessionApiKey = els.apiKey.value.trim();
     settings = { mode, providerName: els.providerName.value, baseUrl: els.baseUrl.value.trim(), modelName: els.modelName.value.trim() };
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) { /* private browsing */ }
-    applySettingsStatus(); closeDrawers(); toast(mode === "api" ? "已切换为模型 API" : "已切换为本地演示", "success");
+    applySettingsStatus(); closeDrawers(); toast(mode === "api" ? `已选择 ${currentModelConnection().label}；点击生成后调用` : "已切换为模板演示 · 未调用大模型", "success");
   }
 
   function restoreSettings() {
@@ -5333,10 +5671,46 @@
   }
 
   function applySettingsStatus() {
-    const live = settings.mode === "api";
-    els.providerLabel.textContent = live ? (settings.modelName || "模型 API") : "演示引擎";
-    els.connectionLabel.textContent = live ? "API 模式" : "本地模式";
-    els.connectionDot.classList.toggle("live", live);
+    const current = currentModelConnection();
+    els.providerLabel.textContent = current.label;
+    els.connectionLabel.textContent = serviceConnected === false ? "服务未连接" : serviceConnected === null ? "正在检查服务" : "服务已连接";
+    els.connectionDot.classList.toggle("live", current.mode === "live" && current.ready && serviceConnected === true);
+    els.engineBannerTitle.textContent = current.label;
+    els.engineBannerDetail.textContent = serviceConnected === false ? "本地服务未连接，当前草稿仍保留。启动服务后点击“重新连接服务”。" : current.detail;
+    els.engineBanner.dataset.mode = current.mode;
+    els.retryConnectionButton.hidden = serviceConnected !== false;
+    updateSettingsOverview();
+  }
+
+  function currentModelConnection() {
+    return executionMode.connection({ settings, server: serverProvider, keyPresent: Boolean(sessionApiKey) });
+  }
+
+  function requireModelConnection({ project = false } = {}) {
+    const current = currentModelConnection();
+    if (current.mode === "local") return true;
+    if (!current.ready || (project && !current.projectReady)) {
+      openSettings();
+      toast(project && current.source === "browser"
+        ? "项目母稿与渠道变体使用服务端模型。当前是页面临时连接：可用“生成初稿”单篇写作，或清空页面连接字段后选用服务端配置。"
+        : "真实模型连接尚未完成，请检查模型名称、接口和本页密钥。", "warning");
+      return false;
+    }
+    return true;
+  }
+
+  function renderDocumentExecution() {
+    const value = executionMode.execution(appState.document.execution);
+    els.documentExecution.textContent = value ? `本稿生成来源：${value.label} · 编辑内容由你确认` : "本稿生成来源：未记录（历史稿或手工内容）";
+  }
+
+  async function retryServiceConnection() {
+    setButtonBusy(els.retryConnectionButton, true, "正在重连…");
+    try {
+      const ready = await bootstrap();
+      if (ready) { await loadArticleSources(); await initializePhase2Service(); toast("服务已重新连接，草稿已保留", "success"); }
+      else toast("尚未连上本地服务，请确认服务已启动", "warning");
+    } finally { setButtonBusy(els.retryConnectionButton, false); }
   }
 
   function toggleApiKey() {
@@ -5484,6 +5858,8 @@
       if (saved && typeof saved === "object") {
         const defaults = freshState();
         appState = { ...defaults, ...saved, form: { ...defaults.form, ...(saved.form || {}) }, document: { ...defaults.document, ...(saved.document || {}) }, exportMeta: { ...defaults.exportMeta, ...(saved.exportMeta || {}) } };
+        appState.scenarioId = scenarioCatalog.profiles[saved.scenarioId] ? saved.scenarioId : scenarioWorkspace.inferScenario(appState.form.document_type);
+        appState.styleCustom = saved.styleCustom ?? scenarioWorkspace.profile(appState.scenarioId).styles.some((style) => style.label === appState.form.reference_style);
         appState.styleReferences = Array.isArray(saved.styleReferences) ? saved.styleReferences.map(normalizeArticleReference).filter((item) => item.id).slice(0, 8) : [];
         appState.checklist = Array.from({ length: 6 }, (_, index) => Boolean(Array.isArray(saved.checklist) && saved.checklist[index]));
         appState.serverDocumentId = typeof saved.serverDocumentId === "string" ? saved.serverDocumentId : "";
@@ -5494,9 +5870,12 @@
   }
 
   function applyStateToUI() {
+    renderDocumentExecution();
     const form = appState.form;
+    renderScenarioControls(scenarioWorkspace.profile(appState.scenarioId || scenarioWorkspace.inferScenario(form.document_type)), form);
+    ensureDocumentTypeOption(form.document_type);
     els.documentType.value = form.document_type; els.topic.value = form.topic; els.purpose.value = form.purpose;
-    els.audience.value = form.audience; els.referenceStyle.value = form.reference_style || "权威媒体综合写法"; els.length.value = normalizeLength(form.length); els.requirements.value = form.requirements;
+    els.audience.value = form.audience; els.length.value = normalizeLength(form.length); els.requirements.value = form.requirements;
     els.materials.value = form.materials; els.factLock.checked = form.factLock !== false;
     els.titleCount.value = String(Math.max(1, Math.min(20, Number(form.title_count) || 5)));
     const savedCustomMethod = form.content_methodology_id === "custom"
@@ -5525,7 +5904,8 @@
     renderCandidates();
     $$('.checklist input').forEach((checkbox, index) => { checkbox.checked = Boolean(appState.checklist[index]); });
     els.checkProgress.textContent = `${appState.checklist.filter(Boolean).length}/${appState.checklist.length}`;
-    renderReview(); renderFactAudit(); renderSelectedReferences(); applySettingsStatus();
+    if (appState.review) renderReview(); else resetReviewView();
+    renderFactAudit(); renderSelectedReferences(); applySettingsStatus();
   }
 
   function createSnapshot(label, notify) {
@@ -5572,6 +5952,17 @@
   }
 
   function handleKeyboard(event) {
+    const open = [els.settingsDrawer, els.historyDrawer].find((drawer) => drawer.classList.contains("is-open"));
+    if (open) {
+      if (event.key === "Escape") { event.preventDefault(); closeDrawers(); }
+      if (event.key === "Tab") {
+        const controls = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]', open).filter((el) => el.getClientRects().length);
+        const first = controls[0]; const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); generateDocument(); }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); createSnapshot("手动保存的版本", true); }
     if (event.key === "Escape") hideSelectionToolbar();
@@ -5608,8 +5999,9 @@
   }
 
   function setConnection(connected) {
+    serviceConnected = Boolean(connected);
     els.connectionDot.classList.toggle("connected", connected);
-    if (!connected && settings.mode === "demo") els.connectionLabel.textContent = "服务未连接";
+    applySettingsStatus();
   }
 
   function showLoading(title, message) {

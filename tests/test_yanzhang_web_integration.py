@@ -201,15 +201,28 @@ def test_project_material_workflow_asset_review_export_cycle(client: TestClient)
         block for block in fetched_asset_payload["blocks"] if block["kind"] == "paragraph"
     ]
     assert paragraph_blocks
-    assert all(block["evidence_ids"] for block in paragraph_blocks)
+    fact_paragraphs = [block for block in paragraph_blocks if "材料提要" in block["text"]]
+    assert fact_paragraphs
+    assert all(block["evidence_ids"] for block in fact_paragraphs)
+    assert all(
+        not block["evidence_ids"] for block in paragraph_blocks if block not in fact_paragraphs
+    )
 
     repository = client.app.state.yanzhang_knowledge
     claims = repository.list_claims(asset_id, project_id=project_id)
     citations = repository.list_citations(asset_id, project_id=project_id)
     assert claims
     assert citations
-    assert all(claim.evidence_ids for claim in claims)
-    assert {citation.claim_id for citation in citations} == {claim.id for claim in claims}
+    fact_block_ids = {block["id"] for block in fact_paragraphs}
+    fact_claims = [claim for claim in claims if claim.block_id in fact_block_ids]
+    assert fact_claims
+    assert all(claim.evidence_ids and claim.status == "supported" for claim in fact_claims)
+    assert all(
+        not claim.evidence_ids and claim.status == "unsupported"
+        for claim in claims
+        if claim.block_id not in fact_block_ids
+    )
+    assert {citation.claim_id for citation in citations} == {claim.id for claim in fact_claims}
 
     reviewed = client.post(
         f"/api/v2/projects/{project_id}/assets/{asset_id}/review",
@@ -427,7 +440,9 @@ def test_v2_bootstrap_is_public_and_validation_does_not_reflect_values(tmp_path:
         assert submitted_value not in invalid.text
 
 
-def test_configured_model_enables_balanced_live_routing(tmp_path: Path) -> None:
+def test_configured_model_is_available_without_changing_default_local_execution(
+    tmp_path: Path,
+) -> None:
     settings = RuntimeSettings(
         environment="test",
         server_provider=ProviderSettings(
@@ -447,8 +462,10 @@ def test_configured_model_enables_balanced_live_routing(tmp_path: Path) -> None:
         payload = bootstrap.json()
         assert payload["live_model_available"] is True
         assert payload["routing_preset"] == "balanced"
-        assert payload["resolved_route"]["preset"] == "balanced"
-        assert payload["resolved_route"]["allows_network"] is True
+        assert payload["resolved_route"]["preset"] == "local_only"
+        assert payload["resolved_route"]["allows_network"] is False
+        assert payload["execution"]["uses_model"] is False
+        assert payload["model"]["default_model"] == "fixture-model"
         assert "fixture-model-key" not in bootstrap.text
 
 

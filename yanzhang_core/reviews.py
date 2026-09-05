@@ -20,6 +20,7 @@ from yanzhang_core.models import (
     WritingBrief,
 )
 from yanzhang_core.provenance import checkable_fact_anchors
+from yanzhang_core.scenario_profiles import get_scenario_profile, scenario_for_document_type
 
 type ReviewDimension = Literal[
     "evidence",
@@ -47,6 +48,37 @@ _DIMENSION_LABELS: dict[ReviewDimension, str] = {
     "language": "语言与规范",
     "format": "格式与交付",
 }
+_SCENE_DIMENSION_LABELS: dict[str, dict[ReviewDimension, str]] = {
+    "workplace": {
+        "evidence": "信息与承诺依据",
+        "logic": "结论与信息组织",
+        "clarity": "清晰与简洁",
+        "audience_tone": "沟通对象与语气",
+        "language": "术语与语言",
+        "format": "行动与交付",
+    },
+    "media": {
+        "evidence": "新闻事实与出处",
+        "logic": "叙事与读者价值",
+        "clarity": "重点与可读性",
+        "audience_tone": "受众与渠道",
+        "language": "表达与措辞",
+        "format": "发布格式",
+    },
+    "academic": {
+        "evidence": "研究证据与引用",
+        "logic": "问题与论证",
+        "clarity": "概念与表达",
+        "audience_tone": "学术语气与审慎性",
+        "language": "术语与语言规范",
+        "format": "研究结构与交付",
+    },
+}
+_RESEARCH_ASSERTION = re.compile(
+    r"研究(?:结果)?(?:表明|证明|发现)|实验(?:结果)?(?:显示|证实)|存在显著|具有显著|首次(?:提出|证明)"
+)
+_PENDING_SLOT = re.compile(r"【待(?:补充|确认|核查|核对|论证|粘贴|检验)[^】]*】")
+
 _NUMBER = re.compile(r"\d[\d,.]*(?:%|％)?")
 _SENTENCE = re.compile(r"[^。！？!?；;]+[。！？!?；;]?")
 _REPEATED_PUNCTUATION = re.compile(r"([，。！？：；、])\1+")
@@ -132,6 +164,12 @@ def run_review(request: ReviewRequest) -> ReviewReport:
         raw_issues.append((dimension, severity, block.id if block else None, message, suggestion))
 
     asset = request.asset
+    scenario_id = (
+        request.brief.scenario_pack_id
+        if request.brief is not None
+        else scenario_for_document_type(asset.content_type).id
+    )
+    profile = get_scenario_profile(scenario_id)
     structural_topic = request.brief.title if request.brief is not None else None
     evidence_by_id = {item.id: item for item in request.evidence}
     evidence_anchors = {item.id: checkable_fact_anchors(item.excerpt) for item in request.evidence}
@@ -197,7 +235,7 @@ def run_review(request: ReviewRequest) -> ReviewReport:
                 "保留信息更完整的一段，并让后续段落承担新的论证任务。",
             )
     headings = tuple(block for block in asset.blocks if block.kind == "heading")
-    if len(asset.blocks) >= 4 and not headings:
+    if len(asset.blocks) >= 4 and not headings and asset.channel not in {"email", "social"}:
         add(
             "logic",
             "info",
@@ -218,7 +256,9 @@ def run_review(request: ReviewRequest) -> ReviewReport:
                 "warning",
                 block,
                 f"本段有 {len(long_sentences)} 个句子超过90字。",
-                "拆分并列成分，按“结论—依据—行动”改成更短句群。",
+                "拆分并列成分，按“主张—依据—适用边界”组织短句群。"
+                if scenario_id == "academic"
+                else "拆分并列成分，让每个短句承担一个信息重点。",
             )
         if len(block.text) > 600:
             add(
@@ -240,7 +280,12 @@ def run_review(request: ReviewRequest) -> ReviewReport:
                 "当前表达与正式交付渠道的语气不一致。",
                 "替换口语化、装饰性或情绪化表达，并保持语气稳定。",
             )
-    if request.brief is not None and request.brief.audience not in asset.plain_text():
+    if (
+        request.brief is not None
+        and scenario_id != "academic"
+        and asset.channel == "email"
+        and request.brief.audience not in asset.plain_text()
+    ):
         add(
             "audience_tone",
             "info",
@@ -308,6 +353,135 @@ def run_review(request: ReviewRequest) -> ReviewReport:
     if not asset.title.strip():
         add("format", "error", None, "文字资产缺少标题。", "补充可识别的交付标题。")
 
+    # Scene-specific checks retain the same six stable API dimensions while
+    # making their meaning fit the selected task instead of imposing office
+    # responsibility/deadline rules on research or editorial work.
+    for block in asset.blocks:
+        if _PENDING_SLOT.search(block.text):
+            add(
+                "evidence",
+                "warning",
+                block,
+                "仍有待补充或待核对内容，当前稿件属于未完成草稿。",
+                "逐项补齐真实材料并复核，再移除占位标记；不要把模板提示作为正文交付。",
+            )
+        if scenario_id == "academic":
+            if _RESEARCH_ASSERTION.search(block.text) and not _NUMBER.search(block.text):
+                claim_like_count += 1
+                if block.evidence_ids and all(item in evidence_ids for item in block.evidence_ids):
+                    # A relation alone does not establish that an empirical
+                    # claim is supported. Semantic support remains human review.
+                    add(
+                        "evidence",
+                        "info",
+                        block,
+                        "研究结论已关联材料，但结论是否由研究设计和结果支持仍需复核。",
+                        "核查原文结果、方法限制及论断范围；本地规则不验证统计显著性或因果关系。",
+                    )
+                else:
+                    add(
+                        "evidence",
+                        "warning",
+                        block,
+                        "包含研究发现或效果判断，但没有可回查的证据关系。",
+                        "补充真实文献或研究结果的定位；未验证的内容写为待检验问题而非既定结论。",
+                    )
+            if any(
+                term in block.text
+                for term in ("压实责任", "提高政治站位", "开创新局面", "大力推进落实")
+            ):
+                add(
+                    "audience_tone",
+                    "warning",
+                    block,
+                    "研究文本混入部署性或宣传性套话。",
+                    "改用研究问题、概念关系、材料依据与解释边界说明观点。",
+                )
+            if any(
+                term in block.text for term in ("彻底证明", "毫无争议", "必然导致", "百分之百有效")
+            ):
+                add(
+                    "audience_tone",
+                    "warning",
+                    block,
+                    "学术判断含有过度确定或绝对化表述。",
+                    "根据研究设计与证据强度限定结论，说明可能的混杂因素和适用范围。",
+                )
+        elif scenario_id == "media" and any(
+            term in block.text for term in ("全网第一", "史上最强", "绝对有效", "百分之百保证")
+        ):
+            add(
+                "audience_tone",
+                "warning",
+                block,
+                "传播文案使用未经界定的极限词或效果承诺。",
+                "使用具体、可核对的信息表达价值，说明比较范围或删去无依据的承诺。",
+            )
+
+    full_text = asset.plain_text()
+    if scenario_id == "academic":
+        recipe_id = request.brief.recipe_id if request.brief is not None else ""
+        if recipe_id == "literature-review" or asset.content_type == "文献综述":
+            if not any(block.evidence_ids for block in asset.blocks):
+                add(
+                    "evidence",
+                    "warning",
+                    None,
+                    "文献综述尚未建立文献主张与实际来源的对应关系。",
+                    "导入真实文献，为关键观点关联出处和页段；参考文献列表本身不证明正文主张。",
+                )
+        if recipe_id == "research-abstract" or asset.content_type in {"摘要", "研究摘要"}:
+            missing_parts = tuple(
+                term for term in ("方法", "结果", "结论") if term not in full_text
+            )
+            if missing_parts:
+                add(
+                    "logic",
+                    "warning",
+                    None,
+                    "研究摘要缺少可识别的" + "、".join(missing_parts) + "信息。",
+                    "从实际研究原文提取相应要素；未完成研究应表明设计阶段，不补造结果。",
+                )
+        if recipe_id == "reviewer-response" or asset.content_type in {"审稿回复", "审稿意见回复"}:
+            if not any(term in full_text for term in ("页", "段落", "章节", "行号")):
+                add(
+                    "format",
+                    "warning",
+                    None,
+                    "审稿回复尚未提供可定位的修改位置。",
+                    "按意见逐条列出回应、实际修改与页码或章节位置，区分已修改和拟修改。",
+                )
+    elif scenario_id == "workplace":
+        if asset.channel in {"email", "meeting"} and not any(
+            term in full_text for term in ("确认", "回复", "反馈", "无需回复", "仅供", "知悉")
+        ):
+            add(
+                "format",
+                "info",
+                None,
+                "尚未说明接收者是否需要行动或回复。",
+                "明确这是一封信息同步还是行动请求；如需响应，填写具体请求及已确认的时间。",
+            )
+        if asset.content_type == "周报" and not any(
+            term in full_text for term in ("风险", "阻塞", "待协同")
+        ):
+            add(
+                "logic",
+                "info",
+                None,
+                "周报未显式说明风险或协作需求的状态。",
+                "核对是否存在阻塞；确认没有风险时也可明确说明，不凭空新增问题。",
+            )
+    elif scenario_id == "media" and asset.content_type == "新闻稿":
+        if not any(block.evidence_ids for block in asset.blocks):
+            add(
+                "evidence",
+                "warning",
+                None,
+                "新闻事实尚未关联可回查的出处。",
+                "核对事件主体、时间地点、经过与引述原文，并为重要事实补充来源定位。",
+            )
+
     issues = tuple(
         ReviewIssue(
             id=f"issue-{index:03d}",
@@ -319,7 +493,10 @@ def run_review(request: ReviewRequest) -> ReviewReport:
         )
         for index, (dimension, severity, block_id, message, suggestion) in enumerate(raw_issues, 1)
     )
-    dimension_scores = tuple(_score_dimension(dimension, issues) for dimension in _DIMENSIONS)
+    labels = _SCENE_DIMENSION_LABELS.get(profile.id, _DIMENSION_LABELS)
+    dimension_scores = tuple(
+        _score_dimension(dimension, issues, label=labels[dimension]) for dimension in _DIMENSIONS
+    )
     overall_score = round(sum(item.score for item in dimension_scores) / len(dimension_scores))
     evidence_coverage = (
         100 if claim_like_count == 0 else round(cited_claim_like_count * 100 / claim_like_count)
@@ -342,17 +519,19 @@ def run_review(request: ReviewRequest) -> ReviewReport:
 
 
 def _score_dimension(
-    dimension: ReviewDimension, issues: tuple[ReviewIssue, ...]
+    dimension: ReviewDimension, issues: tuple[ReviewIssue, ...], *, label: str
 ) -> ReviewDimensionScore:
     matching = tuple(issue for issue in issues if issue.dimension == dimension)
     penalties = {"info": 3, "warning": 10, "error": 25}
     score = max(0, 100 - sum(penalties[issue.severity] for issue in matching))
     summary = (
-        "检查通过，未发现规则级问题。" if not matching else f"发现 {len(matching)} 项可处理问题。"
+        "未发现规则级问题，仍需人工核对事实与语境。"
+        if not matching
+        else f"发现 {len(matching)} 项可处理问题。"
     )
     return ReviewDimensionScore(
         dimension=dimension,
-        label=_DIMENSION_LABELS[dimension],
+        label=label,
         score=score,
         issue_count=len(matching),
         summary=summary,

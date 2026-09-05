@@ -105,6 +105,19 @@ Provider API Key、模型 URL 或访问令牌。
 1–100 字符、`purpose` 1–500 字符，`required` 默认 `true`。同一列表内的章节 ID 与标题
 必须各自唯一，输入顺序即提纲与母稿顺序。
 
+### 执行模式与结果来源
+
+模板演示使用确定性模板、公式和规则，没有调用任何大模型，不消耗模型 Token；MCP 仍可读写
+本地服务中的项目、资料和文稿。主动来源导入或公开文献查询仍会联网。`live=false` 是工作流
+创建、渠道变体和模型增强审校的默认值，服务端配置了模型也不会自动启用实时调用。显式
+`live=true` 只使用服务端模型；未配置时返回稳定错误 `model_configuration_error`，不静默返回模板稿。
+
+生成与审校结果中的 `execution` 包含 `mode`、`engine`、`provider`、`model`、`label`、`uses_model`。
+规则执行为 `local / deterministic`，供应商与模型为 `null`，`uses_model=false`；真实模型执行为
+`live / language_model`，返回实际配置的供应商和型号，不把 `resolved_route` 中的画像当成型号。
+`yanzhang_get_asset` 顶层 `execution` 和版本列表的可选 `Revision.execution` 来自所选版本；
+手工修订及没有记录的历史版本为 `null`，不根据当前配置补猜。结果不返回密钥或模型接口地址。
+
 ## 3. 状态与场景包工具
 
 | 工具 | 输入 | 行为 |
@@ -121,6 +134,14 @@ Provider API Key、模型 URL 或访问令牌。
   `presentation-outline`；
 - `media`：`press-release`、`wechat-article`、`social-post`、`short-video-script`；
 - `academic`：`literature-review`、`research-outline`、`research-abstract`、`reviewer-response`。
+
+场景不只是显示名称。类型化场景指引统一约束写法、语气、结构、材料角色和审校关注点：公文强调
+行文与任务落实，职场强调结论与行动项，传播区分事实与观点，学术围绕问题、方法、证据和引用。
+场景定义来自 `yanzhang_core/scenario_profiles.py`，配方仍由 `yanzhang_core/packs.py` 注册；
+Web 使用同一目录的生成副本。内置写法卡是方法说明，不表示工具已检索或读过来源正文。
+四个场景另提供 26 张写法方法卡：公文 6、职场 7、传播 6、学术 7，区别于 19 个配方的章节
+结构。职场/传播材料及团队范例由用户手工导入；学术使用导入文献、原文证据与已有公开元数据
+连接器，本轮未新增商业媒体自动采集工具。
 
 ## 4. 项目与资料工具
 
@@ -178,11 +199,14 @@ Provider API Key、模型 URL 或访问令牌。
 | 字段 | 默认 | 限制 |
 | --- | --- | --- |
 | `brief_id` | 空 | 已保存项目简报 ID，1–128 字符；填写时完整规范化简报（包括 `material_ids`、`selected_title`、`structure_override`）必须与已存内容一致 |
+| `live` | `false` | 显式 `true` 使用服务端模型；未配置时返回 `model_configuration_error` |
 | `auto_review` | `true` | 是否在写作后运行审校步骤 |
 | `requested_exports` | `[]` | 最多 7 个唯一资产导出格式 |
 
 公共字段中的 `selected_title` 存在时工作流保留该标题，否则采用推荐候选；非空
-`structure_override` 作为工作流提纲与母稿的完整有序结构。
+`structure_override` 作为工作流提纲与母稿的完整有序结构。`live` 在创建时保存，后续运行和恢复
+沿用该值；创建结果及工作流对象的 `execution` 披露该路径。标题、提纲和自动审校步骤仍使用规则，
+母稿 `draft` 步骤按 `live` 选择引擎，上述四类步骤输出标注自己的 `execution`。
 
 省略 `brief_id` 时服务创建并保存新简报；传入时复用同项目的已保存简报。创建响应顶层
 返回 `brief_id`，工作流对象也返回同一 `brief_id`；客户端用它绑定后续资产、版本和审校结果。
@@ -217,13 +241,21 @@ Provider API Key、模型 URL 或访问令牌。
 
 `target_channel` 使用共同渠道枚举。`yanzhang_review_asset` 中 `structure` 映射逻辑/格式，
 `style` 映射清晰度/语气/语言，`facts` 与 `citations` 映射证据，`terminology` 映射语言；响应同时
-返回 `effective_mode`、`resolved_route`、请求画像和模型问题数。仅 `live=true` 且模型已配置、
+返回 `execution`、`effective_mode`、`resolved_route`、请求画像和模型问题数。仅 `live=true` 且模型已配置、
 路由允许网络时执行模型增强，本地规则始终先执行。导出返回文件名、媒体类型、大小、哈希、
 `project_id`、`asset_id`、`revision_id`、`creator` 和项目作用域 Resource URI；DOCX 直接保留
 内容块的标题层级，并去除与资产标题重复的标题块。`template_id` 仅用于 DOCX：
 `standard` 是规范文稿样式，`brief` 是紧凑简报样式；其他格式携带该字段会作为参数错误处理。
 
 ## 6. 学术与研究写作工具
+
+本节的学术拟题、提纲、摘要、证据提取、引用核验、完整性检查和审稿回复等当前使用本地规则
+引擎，不是模型调用接口。页面切换 API 或为 MCP 客户端选择模型，不会让这些工具自动调用
+砚章服务端模型。公开文献检索是单独的网络操作，使用来源连接器而非模型 Provider。
+
+当前学术写作使用项目关联的书目元数据及用户导入原文、证据摘录。书目只识别来源，正文与证据
+才支持研究论断；没有真实文献或研究结果时输出框架与待补位置，不补造引文。党政媒体样文与
+学术材料分开使用。全文自动获取、目标期刊精确排版与真实模型效果不由本节工具或场景切换保证。
 
 ### 文献检索与导入
 
@@ -286,6 +318,23 @@ DOI 只做规范化。文件或手工导入默认不设置 `metadata_verified`�
 - `yanzhang_draft_abstract`：`claims` 最多 500、`links` 最多 1000、`max_characters` 默认 800、
   范围 100–20000。
 
+`yanzhang_create_academic_outline` 返回的 `outline.task_type` 新增为五值枚举：
+`literature-review`、`research-outline`、`abstract`、`rebuttal`、`research-paper`。
+输入仍由 `document_type` 选择任务：综述使用问题/主题/分歧/空白四节，研究提纲使用问题/框架/
+资料方法/章节四节，摘要使用背景目的/方法/结果/结论四节，审稿回复使用总体说明/逐条回复/
+修改定位/保留意见四节；通用研究论文保留引言至结论的六章。`task_type` 是输出标识，不是工具
+新增输入参数。摘要正文由 `yanzhang_draft_abstract` 返回，`abstract.task_type` 固定为 `abstract`；
+逐条回复正文仍由 `yanzhang_prepare_rebuttal` 根据意见与实际修改生成。
+
+领域函数 `create_outline(..., journal=...)` 以非空 `journal.required_sections` 优先覆盖默认
+章节；当前 MCP 提纲请求不接收 `journal`，期刊参数仍由完整性检查工具接收。
+
+项目母稿消费浏览器学术材料包时优先分配原文证据块。本地组合的 480 字符上限只用于证据正文，
+文献 ID、证据 ID 标记和材料包中已有的完整定位行独立保留；截断正文前另列
+“下文已截断，不代表完整引文；请回查原始证据及上下文。”提示，不将提示混入原文。
+书目和包说明不充当研究结论；真实模型上下文单列
+`bibliographic_metadata`，与事实 `knowledge` 分离。它是内部提示字段，不是 MCP 工具的新参数。
+
 其余学术工具：
 
 | 工具 | 输入字段与限制 | 行为 |
@@ -317,6 +366,7 @@ DOI 只做规范化。文件或手工导入默认不设置 `metadata_verified`�
 兼容工具继续遵守 v0.1 的关键规则：
 
 - `engine` 取 `auto`、`server` 或 `local`；模型和访问凭据不进入参数；
+- 兼容生成、拟题、改写与审校按请求文种选择场景指引，避免把职场、传播和学术任务套为公文；
 - `gongwen_generate_document` 自动保存并返回 `id`、`version` 与最多 4000 字预览；全文通过
   `gongwen_read_document` 分块读取；
 - 指定新 `document_id` 时使用 `expected_version: 0`，更新时使用最新 `current_version`；
@@ -325,6 +375,27 @@ DOI 只做规范化。文件或手工导入默认不设置 `metadata_verified`�
 - `gongwen_get_style_references` 接受 1–8 个文章 ID，只把文章作为结构与表达参考，不作为正文事实或证据链来源；
 - 删除文稿/文章是持久化副作用；客户端先向用户复述目标 ID 与标题；
 - 导出工件默认 24 小时有效，过期后由原文稿和版本重新生成。
+
+### 按场景改写与审校
+
+`gongwen_rewrite_text` 保留原参数，并新增可选 `document_type`：
+
+| 字段 | 必填 / 默认 | 限制与含义 |
+| --- | --- | --- |
+| `text` | 必填 | 1–100000 字符，要改写的文本 |
+| `document_type` | `""` | 最多 100 字符，按当前成果类型选择公文、职场、传播或学术语域 |
+| `instruction` | `提升表达的规范性、准确性和凝练度` | 最多 2000 字符 |
+| `mode` | `polish` | 最多 80 字符 |
+| `tone` | `稳健规范` | 最多 100 字符 |
+| `engine` | `auto` | `auto`、`server` 或 `local` |
+
+省略 `document_type` 保持旧调用兼容，自由文本按中性职场场景处理；建议传入当前成果类型，
+例如 `文献综述`、`邮件`、`新闻稿` 或 `工作总结`。`gongwen_review_document` 已有的
+`document_type` 现用于选择对应场景的审校重点，无需新增参数。
+
+`gongwen_get_methods` / `gongwen://methods/{document_type}` 从全部核心配方派生
+`recipe-<recipe_id>` 结构，同时保留旧结构方法。非党政配方默认返回各自的 5 类标题公式，
+不继承党报写法；场景的 26 张方法卡与该接口的结构方法集合属于不同目录。
 
 ## 8. Resources 与兼容 Prompts
 
@@ -408,6 +479,7 @@ python scripts/package_connector.py dist
 | 类别 | 处理 |
 | --- | --- |
 | `invalid_request` | 按返回字段路径修正类型、枚举、长度或未定义字段 |
+| `model_configuration_error` | 检查服务端模型配置与路由设置，再重试显式实时请求 |
 | `brief_conflict` | 已保存的稳定简报 ID 对应不同内容；保留旧记录并为新内容使用新 ID |
 | `project_scope_error` | 核对项目 ID；该资源 ID 已绑定其他项目，不应跨项目复用 |
 | `not_found` | 核对项目、资料、资产、版本或文献 ID |

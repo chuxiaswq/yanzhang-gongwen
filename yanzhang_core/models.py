@@ -203,6 +203,17 @@ class ContentBlock(CoreModel):
         return self
 
 
+class ExecutionInfo(CoreModel):
+    """Non-secret engine identity captured at generation time, not a route alias."""
+
+    mode: Literal["local", "live"]
+    engine: Literal["deterministic", "language_model"]
+    provider: str | None = Field(default=None, min_length=1, max_length=100)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=400)
+    uses_model: bool
+
+
 class Revision(CoreModel):
     """An immutable version snapshot of a text asset."""
 
@@ -213,6 +224,7 @@ class Revision(CoreModel):
     blocks: tuple[ContentBlock, ...] = Field(min_length=1, max_length=10_000)
     created_at: datetime = Field(default_factory=_utcnow)
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    execution: ExecutionInfo | None = None
 
     @model_validator(mode="after")
     def validate_blocks(self) -> Self:

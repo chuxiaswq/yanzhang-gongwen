@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from yanzhang_core.models import (
     Channel,
     ContentBlock,
+    ExecutionInfo,
     ProjectTerm,
     Revision,
     TextAsset,
@@ -360,6 +361,7 @@ class WritingStorage:
             blocks=normalized_blocks,
             model_profile_id=model_profile_id or brief.model_profile_id,
             created_at=asset.created_at,
+            execution=_execution_from_metadata(metadata or {}),
         )
         with self.write_transaction() as connection:
             if project_id is not None and parent_asset_id is not None:
@@ -868,7 +870,7 @@ def _insert_revision(
         INSERT INTO revisions(
             id, asset_id, version, title, note, blocks_json, model_profile_id,
             workflow_run_id, model_lineage_json, metadata_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
         """,
         (
             revision.id,
@@ -879,6 +881,11 @@ def _insert_revision(
             _dump_json(revision.blocks),
             revision.model_profile_id,
             workflow_run_id,
+            _dump_json(
+                {"execution": revision.execution.model_dump(mode="json")}
+                if revision.execution is not None
+                else {}
+            ),
             _datetime_text(revision.created_at),
         ),
     )
@@ -919,6 +926,11 @@ def _asset_from_row(row: sqlite3.Row) -> TextAsset:
     )
 
 
+def _execution_from_metadata(metadata: Mapping[str, object]) -> ExecutionInfo | None:
+    raw = metadata.get("execution")
+    return ExecutionInfo.model_validate(raw) if raw is not None else None
+
+
 def _revision_from_row(row: sqlite3.Row) -> Revision:
     return Revision(
         id=str(row["id"]),
@@ -928,6 +940,7 @@ def _revision_from_row(row: sqlite3.Row) -> Revision:
         blocks=_blocks_from_json(str(row["blocks_json"])),
         created_at=_parse_datetime(str(row["created_at"])),
         model_profile_id=str(row["model_profile_id"]) if row["model_profile_id"] else None,
+        execution=_execution_from_metadata(_load_object(str(row["metadata_json"]))),
     )
 
 

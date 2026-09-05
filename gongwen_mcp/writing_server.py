@@ -562,6 +562,7 @@ def register_writing_tools(
         brief_id: ShortId | None = None,
         selected_title: Annotated[str, Field(min_length=1, max_length=300)] | None = None,
         structure_override: StructureOverride | None = None,
+        live: bool = False,
         auto_review: bool = True,
         requested_exports: list[AssetExportFormat] | None = None,
     ) -> dict[str, object]:
@@ -586,6 +587,7 @@ def register_writing_tools(
                 brief_id=brief_id,
                 selected_title=selected_title,
                 structure_override=structure_override or [],
+                live=live,
                 auto_review=auto_review,
                 requested_exports=requested_exports or [],
             )

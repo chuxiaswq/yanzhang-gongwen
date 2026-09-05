@@ -143,11 +143,12 @@ async def test_saved_brief_title_structure_and_sources_reach_workflow_asset(
         "二、在攻坚中打开新局",
     ]
     assert "999" not in asset.plain_text()
-    assert all(
-        style_id not in block.knowledge_item_ids and source_id in block.knowledge_item_ids
-        for block in asset.blocks
-        if block.kind == "paragraph"
-    )
+    paragraphs = tuple(block for block in asset.blocks if block.kind == "paragraph")
+    assert all(style_id not in block.knowledge_item_ids for block in paragraphs)
+    fact_paragraphs = tuple(block for block in paragraphs if "材料提要" in block.text)
+    assert fact_paragraphs
+    assert all(source_id in block.knowledge_item_ids for block in fact_paragraphs)
+    assert all(not block.knowledge_item_ids for block in paragraphs if block not in fact_paragraphs)
     assert platform.knowledge.list_evidence(source_id, project_id=project_id)
     assert platform.knowledge.list_evidence(style_id, project_id=project_id) == []
     assert [item.id for item in platform.storage.list_briefs(project_id=project_id)] == [

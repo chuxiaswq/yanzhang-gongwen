@@ -220,6 +220,7 @@ class RewriteRequest(APIModel):
     """A local selection and the requested editing operation."""
 
     text: str = Field(min_length=1, max_length=100_000)
+    document_type: str = Field(default="", max_length=100)
     instruction: str = "提升表达的规范性、准确性和凝练度"
     mode: str = "polish"
     tone: str = "稳健规范"

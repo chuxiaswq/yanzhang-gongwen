@@ -13,6 +13,9 @@ JS_TEST_SCRIPTS = tuple(sorted((ROOT / "tests/js").glob("*.test.cjs")))
 JS_BROWSER_SOURCES = (
     ROOT / "gongwen_web/static/app.js",
     ROOT / "gongwen_web/static/workspace_context.js",
+    ROOT / "gongwen_web/static/execution_mode.js",
+    ROOT / "gongwen_web/static/scenario_catalog.js",
+    ROOT / "gongwen_web/static/scenario_workspace.js",
     ROOT / "gongwen_web/static/response_validators.js",
 )
 

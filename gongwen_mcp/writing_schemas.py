@@ -237,6 +237,7 @@ class GenerateTitlesRequest(_BriefRequest):
 
 class CreateWorkflowRequest(_BriefRequest):
     brief_id: str | None = Field(default=None, min_length=1, max_length=128)
+    live: bool = False
     auto_review: bool = True
     requested_exports: list[AssetExportFormat] = Field(default_factory=list, max_length=7)
 

@@ -88,6 +88,7 @@ from yanzhang_core.models import (
 )
 from yanzhang_core.packs import ScenarioPackId, list_recipes
 from yanzhang_core.parsers import DocumentParseError, parse_document
+from yanzhang_core.routing import ModelExecutionConfigurationError
 from yanzhang_core.storage import BriefConflictError, ProjectScopeError
 
 _DEFAULT_MAX_REQUEST_BYTES: Final = 8 * 1024 * 1024
@@ -977,6 +978,10 @@ async def _invoke_platform_extension(
         raise YanzhangToolError("brief_conflict", "任务简报标识已绑定其他内容") from None
     except ProjectScopeError:
         raise YanzhangToolError("project_scope_error", "资源不属于当前项目") from None
+    except ModelExecutionConfigurationError:
+        raise YanzhangToolError(
+            "model_configuration_error", "当前任务需要可用的服务端模型。请检查模型配置与路由设置"
+        ) from None
     except (KeyError, LookupError):
         raise YanzhangToolError("not_found", "未找到指定资源") from None
     except ValueError:
@@ -1115,6 +1120,7 @@ def _exception_response(exc: Exception) -> JSONResponse:
     if isinstance(exc, YanzhangToolError):
         status_by_code = {
             "invalid_request": 422,
+            "model_configuration_error": 422,
             "brief_conflict": 409,
             "project_scope_error": 409,
             "not_found": 404,

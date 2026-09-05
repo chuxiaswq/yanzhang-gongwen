@@ -19,6 +19,7 @@ from yanzhang_academic.models import (
     RebuttalItem,
     ResearchBrief,
     ResearchClaim,
+    ResearchTaskType,
     ReviewComment,
     TitleSuggestion,
 )
@@ -82,14 +83,18 @@ def create_outline(
         and snippet.record_source_hash == record_map[snippet.record_id].source_hash
     ]
     record_ids = list(record_map)
+    task_type = _research_task_type(brief.document_type)
     requested = journal.required_sections if journal and journal.required_sections else []
-    headings = requested or ["引言", "文献综述", "研究设计", "研究发现", "讨论", "结论"]
+    headings = requested or _task_headings(task_type)
     sections: list[OutlineSection] = []
     for heading in headings:
         purpose, kinds = _section_plan(heading, brief)
         selected = [snippet for snippet in valid_evidence if snippet.kind in kinds]
         selected_record_ids = list(dict.fromkeys(snippet.record_id for snippet in selected))
-        if heading in {"文献综述", "研究现状"} and not selected_record_ids:
+        if (
+            heading in {"文献综述", "研究现状", "问题与范围", "主题脉络"}
+            and not selected_record_ids
+        ):
             selected_record_ids = record_ids
         sections.append(
             OutlineSection(
@@ -102,6 +107,7 @@ def create_outline(
         )
     return AcademicOutline(
         title=suggest_titles(brief, records, count=1)[0].title,
+        task_type=task_type,
         sections=sections,
         record_ids=record_ids,
     )
@@ -199,7 +205,81 @@ def prepare_rebuttal(
     return result
 
 
+def _research_task_type(document_type: str) -> ResearchTaskType:
+    aliases: dict[str, ResearchTaskType] = {
+        "文献综述": "literature-review",
+        "literature-review": "literature-review",
+        "literature review": "literature-review",
+        "研究提纲": "research-outline",
+        "research-outline": "research-outline",
+        "研究计划": "research-outline",
+        "摘要": "abstract",
+        "论文摘要": "abstract",
+        "研究摘要": "abstract",
+        "abstract": "abstract",
+        "审稿回复": "rebuttal",
+        "审稿意见回复": "rebuttal",
+        "reviewer-response": "rebuttal",
+        "rebuttal": "rebuttal",
+    }
+    return aliases.get(document_type.strip().casefold(), "research-paper")
+
+
+def _task_headings(task_type: ResearchTaskType) -> list[str]:
+    headings = {
+        "literature-review": ["问题与范围", "主题脉络", "证据与分歧", "研究空白"],
+        "research-outline": ["研究问题", "分析框架", "资料与方法", "章节结构"],
+        "abstract": ["背景与目的", "方法", "结果", "结论"],
+        "rebuttal": ["总体说明", "逐条回复", "修改定位", "保留意见"],
+        "research-paper": ["引言", "文献综述", "研究设计", "研究发现", "讨论", "结论"],
+    }
+    return headings[task_type]
+
+
 def _section_plan(heading: str, brief: ResearchBrief) -> tuple[str, set[str]]:
+    task_plans: dict[str, tuple[str, set[str]]] = {
+        "问题与范围": (
+            f"界定综述问题“{brief.research_question}”及概念、检索范围和文献纳入边界。",
+            {"background", "definition", "method"},
+        ),
+        "主题脉络": (
+            "按主题、理论或概念关系组织已导入文献，不按作者逐篇堆砌摘要。",
+            {"background", "definition", "finding"},
+        ),
+        "证据与分歧": (
+            "比较既有研究的结论、研究方法、样本和证据强度，解释一致与分歧。",
+            {"finding", "method", "limitation"},
+        ),
+        "研究空白": (
+            "从已呈现证据的局限推导尚待回答的问题，区分材料未覆盖与领域研究空白。",
+            {"limitation", "finding"},
+        ),
+        "研究问题": (
+            f"将“{brief.research_question}”细化为可回答的问题，并说明研究对象和边界。",
+            {"background", "definition", "limitation"},
+        ),
+        "分析框架": (
+            "界定核心概念、变量及其关系，解释每项关系的理论依据与待验证状态。",
+            {"definition", "background", "finding"},
+        ),
+        "资料与方法": (
+            "说明计划使用的资料、样本选择和分析方法；未确认的资料可得性保留待补标记。",
+            {"method", "limitation"},
+        ),
+        "章节结构": (
+            "为各章指定子问题、证据和预期交付，不把研究计划写成已经完成的发现。",
+            {"background", "method", "finding", "limitation"},
+        ),
+        "总体说明": ("简要致谢并概括实际修改范围，不将拟修改事项写成已完成。", {"other"}),
+        "逐条回复": (
+            "逐条复述审稿意见，说明回应、处理方式及原文或证据依据。",
+            {"other", "finding"},
+        ),
+        "修改定位": ("提供真实修改页码、章节或段落；尚未核实的位置保留待补标记。", {"other"}),
+        "保留意见": ("对未采纳意见说明理由、已有证据及研究范围限制。", {"limitation", "other"}),
+    }
+    if heading in task_plans:
+        return task_plans[heading]
     normalized = heading.casefold()
     if any(term in normalized for term in ("引言", "绪论", "背景", "introduction")):
         return (
@@ -223,11 +303,60 @@ def _section_plan(heading: str, brief: ResearchBrief) -> tuple[str, set[str]]:
 
 
 def _section_questions(heading: str, brief: ResearchBrief) -> list[str]:
-    return [
-        f"本节如何回应研究问题：{brief.research_question}",
-        "本节的关键论断分别由哪些已导入证据支持？",
-        "本节结论的适用范围和限制是什么？",
-    ]
+    questions = {
+        "问题与范围": [
+            "综述涵盖哪些核心概念、时间范围和研究对象？",
+            "采用哪些检索与纳入标准，哪些文献被排除？",
+        ],
+        "主题脉络": [
+            "已有文献可以归纳为哪些主题或理论路径？",
+            "各主题之间是互补、递进还是竞争关系？",
+        ],
+        "证据与分歧": [
+            "哪些研究结论一致，哪些相互冲突？",
+            "方法、样本或测量差异能否解释这些分歧？",
+        ],
+        "研究空白": [
+            "哪些问题仍缺少充分证据，哪些只是当前资料尚未覆盖？",
+            "后续研究需要补充什么材料或采用什么设计？",
+        ],
+        "研究问题": [
+            f"“{brief.research_question}”可以拆分为哪些可回答的子问题？",
+            "研究对象、时间和比较范围如何限定？",
+        ],
+        "分析框架": [
+            "核心概念如何定义与操作化？",
+            "概念或变量间关系的依据是什么，哪些仍是待验证假设？",
+        ],
+        "资料与方法": [
+            "哪些资料已取得，哪些仍需获取或核准？",
+            "拟用方法如何回答子问题，其局限和实施条件是什么？",
+        ],
+        "章节结构": [
+            "各章分别回答哪个子问题并使用哪些材料？",
+            "章节间如何形成论证链，哪些结论必须留待研究后确认？",
+        ],
+        "总体说明": ["本轮实际完成了哪些修改？", "哪些事项仍待处理或人工核准？"],
+        "逐条回复": ["每条意见对应什么回应与处理动作？", "回应依据能否定位到稿件或真实来源？"],
+        "修改定位": ["修改发生在哪一页、章节或段落？", "回复内容是否与实际修改一致？"],
+        "保留意见": ["哪些意见未采纳，理由与证据是什么？", "能否说明研究范围限制而不夸大结论？"],
+    }
+    if heading in questions:
+        return questions[heading]
+    normalized = heading.casefold()
+    if any(term in normalized for term in ("引言", "绪论", "背景", "introduction")):
+        return [f"为何需要回答“{brief.research_question}”？", "问题背景和研究价值有何已有依据？"]
+    if any(term in normalized for term in ("文献", "研究现状", "literature")):
+        return ["既有研究的主要解释路径是什么？", "结论与证据在哪些方面一致或存在分歧？"]
+    if any(term in normalized for term in ("方法", "设计", "method")):
+        return ["资料来源、样本和方法是否已确认？", "研究过程能否复核，有哪些适用限制？"]
+    if any(term in normalized for term in ("发现", "结果", "result", "finding")):
+        return ["哪些发现由已提供的原文或数据直接支持？", "观察、解释和推断是否清楚区分？"]
+    if any(term in normalized for term in ("讨论", "discussion")):
+        return ["发现与既有研究如何对话？", "有哪些替代解释和证据局限？"]
+    if any(term in normalized for term in ("结论", "conclusion")):
+        return ["研究最终回答了哪些问题？", "贡献、适用边界和后续研究方向是什么？"]
+    return [f"“{heading}”承担哪一项具体论证任务？", "该节需要哪些可定位证据与边界说明？"]
 
 
 def _compact_topic(value: str) -> str:

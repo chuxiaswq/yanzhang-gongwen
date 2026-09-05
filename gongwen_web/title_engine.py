@@ -24,6 +24,7 @@ from gongwen_web.models import (
     StyleReference,
     TitleCandidate,
 )
+from yanzhang_core.scenario_profiles import scenario_for_document_type
 
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 _PLACEHOLDER = re.compile(r"\{(topic|document_type|purpose|audience)\}")
@@ -31,6 +32,22 @@ _UNKNOWN_PLACEHOLDER = re.compile(r"\{[^{}]+\}")
 _ACTION_WORDS = ("推进", "落实", "加强", "提升", "深化", "统筹", "聚焦", "做好", "开展", "促")
 _VAGUE_WORDS = ("有关", "相关", "若干", "适时", "大力")
 _FORMAL_TYPES = frozenset({"通知", "请示", "报告", "函"})
+_NON_OFFICIAL_TYPE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "邮件": ("工作邮件", "职场邮件", "邮件"),
+    "周报": ("工作周报", "周报"),
+    "业务方案": ("业务方案", "商业方案", "实施方案", "方案"),
+    "会议跟办": ("会议跟办清单", "会议跟办", "跟办清单"),
+    "PPT提纲": ("PPT提纲", "演示提纲", "提纲"),
+    "新闻稿": ("新闻稿", "新闻"),
+    "公众号文章": ("公众号文章", "公众号长文", "文章"),
+    "社交媒体文案": ("社交媒体文案", "社媒文案", "文案"),
+    "短视频脚本": ("短视频脚本", "口播脚本", "脚本"),
+    "文献综述": ("文献综述", "研究综述", "综述"),
+    "研究提纲": ("研究提纲", "论文提纲", "提纲"),
+    "摘要": ("结构化摘要", "研究摘要", "论文摘要", "摘要"),
+    "审稿回复": ("逐条审稿回复", "审稿意见回复", "审稿回复", "审稿回应"),
+}
+
 type TitleStructure = Literal["single", "parallel", "subtitle"]
 
 
@@ -177,7 +194,9 @@ def generate_titles_demo(request: TitleGenerationRequest) -> TitleGenerationResu
     document_type = normalize_document_type(request.document_type)
     topic = clean_topic(request.topic)
     formulas = title_formulas_for(document_type, request.formula_ids)
-    reference_profile = analyze_reference_titles(request.style_references)
+    reference_profile = analyze_reference_titles(
+        scenario_style_references(request.document_type, request.style_references)
+    )
     raw_candidates: list[tuple[str, str, str, str, int]] = []
     custom = _custom_formula(request.custom_title_formula)
     if custom is not None:
@@ -215,9 +234,7 @@ def generate_titles_demo(request: TitleGenerationRequest) -> TitleGenerationResu
     if reference_candidate is not None:
         insert_at = 2 if len(raw_candidates) >= 2 else len(raw_candidates)
         raw_candidates.insert(insert_at, reference_candidate)
-    raw_candidates.extend(
-        _derived_candidates(document_type, topic, request.count - len(raw_candidates))
-    )
+    raw_candidates.extend(_derived_candidates(document_type, topic, request.count))
 
     unique: list[tuple[str, str, str, str, int]] = []
     seen: set[str] = set()
@@ -269,7 +286,9 @@ def rank_title_proposals(
     document_type = normalize_document_type(request.document_type)
     topic = clean_topic(request.topic)
     priorities = formula_priorities or {}
-    profile = reference_profile or analyze_reference_titles(request.style_references)
+    profile = reference_profile or analyze_reference_titles(
+        scenario_style_references(request.document_type, request.style_references)
+    )
     ranked_values: list[tuple[int, int, int, TitleProposal, TitleScoreDimensions]] = []
     seen: set[str] = set()
     for order, proposal in enumerate(proposals[: request.count]):
@@ -371,8 +390,13 @@ def score_title(
     else:
         concision = max(30, 100 - (length - ideal_max) * 5)
     action_hits = sum(1 for word in _ACTION_WORDS if word in normalized)
-    action_orientation = min(100, 55 + action_hits * 15)
-    rhythm = _rhythm_score(normalized, reference_profile)
+    scene = scenario_for_document_type(document_type).id
+    action_orientation = min(100, 55 + action_hits * 15) if scene == "gongwen" else 90
+    rhythm = _rhythm_score(normalized, reference_profile) if scene == "gongwen" else 90
+    if scene == "academic" and any(
+        term in normalized for term in ("首次证明", "填补空白", "实干", "开新局")
+    ):
+        clarity = max(20, clarity - 30)
     material_numbers = set(_NUMBER.findall(materials))
     title_numbers = set(_NUMBER.findall(normalized))
     unsupported = title_numbers - material_numbers
@@ -388,6 +412,23 @@ def score_title(
         factual_restraint=factual_restraint,
         formula_fit=max(0, min(100, formula_fit)),
     )
+
+
+def scenario_style_references(
+    document_type: str, references: Iterable[StyleReference]
+) -> list[StyleReference]:
+    """Drop stale publication references when a task has moved to another scenario."""
+
+    if scenario_for_document_type(document_type).id == "gongwen":
+        return list(references)
+    return [
+        reference
+        for reference in references
+        if not any(
+            name in reference.source_name
+            for name in ("人民日报", "人民网", "光明日报", "光明网", "求是")
+        )
+    ]
 
 
 def analyze_reference_titles(
@@ -449,6 +490,14 @@ def _custom_formula(value: CustomTitleFormula | str | None) -> CustomTitleFormul
 def _apply_custom_rule(rule: str, *, topic: str, document_type: str) -> str:
     """Apply a bounded offline interpretation of a user-provided title rule."""
 
+    scene = scenario_for_document_type(document_type).id
+    if scene != "gongwen":
+        if any(label in rule for label in ("主副", "破折号", "副标题")):
+            return f"{topic}——{document_type}"
+        if any(label in rule for label in ("对仗", "并列", "两句")):
+            suffix = "梳理证据 明确边界" if scene == "academic" else "说明现状 明确下一步"
+            return f"{topic}：{suffix}"
+        return f"{topic}：{document_type}"
     if any(label in rule for label in ("主副", "破折号", "副标题")):
         return f"实干担当促提升——{topic}"
     if any(label in rule for label in ("对仗", "并列", "两句")):
@@ -474,8 +523,19 @@ def _render_formula(
     topic: str,
     document_type: str,
 ) -> str:
+    template = formula.template
+    if scenario_for_document_type(document_type).id != "gongwen":
+        suffixes = _NON_OFFICIAL_TYPE_SUFFIXES.get(document_type, (document_type,))
+        if topic.endswith(suffixes) and "{topic}" in template:
+            prefix, _, suffix = template.partition("{topic}")
+            appended_type = suffix.replace("{document_type}", document_type)
+            appended_type = appended_type.strip(" ：:｜|—-").removeprefix("的")
+            if appended_type in suffixes:
+                # Keep the user's complete topic; omit only the redundant formula tag.
+                # Custom formulas never enter this path and remain literal user choices.
+                template = prefix + "{topic}"
     return _render_template(
-        formula.template,
+        template,
         topic=topic,
         document_type=document_type,
         purpose=request.purpose,
@@ -497,7 +557,9 @@ def _render_template(
         "purpose": purpose.strip(),
         "audience": audience.strip(),
     }
-    rendered = _PLACEHOLDER.sub(lambda match: values[match.group(1)], template.strip())
+    rendered = _PLACEHOLDER.sub(lambda match: values[match.group(1)], template.strip()).rstrip(
+        "：｜ "
+    )
     unknown = _UNKNOWN_PLACEHOLDER.search(rendered)
     if unknown:
         raise ValueError(f"标题公式含未知变量：{unknown.group(0)}")
@@ -518,7 +580,24 @@ def _derived_candidates(
     if needed <= 0:
         return []
     templates: tuple[str, ...]
-    if document_type in _FORMAL_TYPES:
+    scene = scenario_for_document_type(document_type).id
+    if scene == "academic":
+        templates = (
+            "{topic}：研究范围与证据",
+            "{topic}的概念与方法",
+            "{topic}：问题与讨论",
+            "{topic}研究的证据边界",
+            "{topic}：已有材料与待解问题",
+        )
+    elif scene != "gongwen":
+        templates = (
+            "{topic}：重点信息",
+            "{topic}的背景与要点",
+            "{topic}：现状与后续",
+            "关于{topic}的沟通要点",
+            "{topic}：信息与判断",
+        )
+    elif document_type in _FORMAL_TYPES:
         templates = (
             "关于深入推进{topic}的{document_type}",
             "关于有序推进{topic}工作的{document_type}",
@@ -567,7 +646,16 @@ def _reference_structure_candidate(
 ) -> tuple[str, str, str, str, int] | None:
     if profile is None:
         return None
-    if document_type in _FORMAL_TYPES:
+    scene = scenario_for_document_type(document_type).id
+    if scene == "academic":
+        title = f"{topic}：研究范围、证据与讨论"
+    elif scene != "gongwen":
+        title = (
+            f"{topic}：背景与要点"
+            if profile.preferred_structure == "single"
+            else f"{topic}——重点信息与后续"
+        )
+    elif document_type in _FORMAL_TYPES:
         if profile.preferred_structure == "parallel":
             title = f"关于统筹推进{topic}并强化责任落实的{document_type}"
         else:
@@ -605,7 +693,7 @@ def _document_compliance(title: str, document_type: str) -> int:
         return 100 if title.startswith("在") and title.endswith("讲话") else 88
     if document_type == "汇报材料":
         return 100 if title.endswith(("汇报", "汇报材料")) else 88
-    return 85
+    return 100 if title.strip() else 0
 
 
 def _topic_relevance(title: str, topic: str) -> int:
@@ -625,7 +713,11 @@ def _information_density(title: str, topic: str, document_type: str) -> int:
     topic_compact = re.sub(r"\s+", "", topic)
     signals = int(bool(topic_compact and topic_compact in compact))
     signals += int(document_type in compact)
-    signals += min(2, sum(1 for word in _ACTION_WORDS if word in compact))
+    if scenario_for_document_type(document_type).id == "gongwen":
+        signals += min(2, sum(1 for word in _ACTION_WORDS if word in compact))
+    else:
+        signals += int(any(mark in title for mark in ("：", "｜", "——")))
+        signals += int(bool(compact))
     vague_penalty = 8 * sum(compact.count(word) for word in _VAGUE_WORDS)
     length_penalty = max(0, len(compact) - 42) * 2
     return max(25, min(100, 48 + signals * 13 - vague_penalty - length_penalty))

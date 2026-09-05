@@ -27,7 +27,8 @@ from yanzhang_core.models import (
     TextAsset,
     WritingBrief,
 )
-from yanzhang_core.packs import RecipeDefinition
+from yanzhang_core.packs import RecipeDefinition, RecipeSection
+from yanzhang_core.scenario_profiles import get_scenario_profile, scenario_for_document_type
 
 type CompositionMode = Literal["local", "live"]
 
@@ -250,6 +251,171 @@ class YanzhangComposer:
             raise CompositionError("所选配方不支持写作简报指定的输出渠道")
 
 
+# Templates describe a section's actual job rather than repeating a generic
+# introduction. Bracketed slots are deliberately not presented as finished facts.
+_SECTION_COPY: dict[str, dict[str, str]] = {
+    "work-email": {
+        "subject": "关于{topic}：{goal}",
+        "context": (
+            "{audience}，您好。此次沟通希望{goal}。核心结论：【待补充：需收件人了解或确认的事项】。"
+        ),
+        "details": "以下信息用于支持本次判断：【待补充：必要背景、当前状态与相关附件】。",
+        "action": (
+            "请确认【待补充：具体请求】；"
+            "回复对象与期望时间为【待确认】。材料中未确认的承诺暂不列入。"
+        ),
+    },
+    "weekly-report": {
+        "done": "本周围绕{topic}记录实际交付。已完成事项：【待补充：成果及验收记录】。",
+        "progress": "进行中的事项按当前状态、剩余工作和下一节点逐项列明。进度：【待补充】。",
+        "risks": "需协同的问题应说明影响、所需支持和处理状态。当前阻塞：【待确认：风险记录】。",
+        "next": "下周优先处理【待确认：任务及交付物】，负责人和时间依据已确认的排期填写。",
+    },
+    "business-proposal": {
+        "problem": (
+            "本方案讨论{topic}。需要解决的业务问题是【待补充：问题表现、影响对象与现有成本】。"
+        ),
+        "goal": "方案目标为{goal}。验收标准与资源边界：【待确认】。",
+        "solution": (
+            "候选路径需比较投入、依赖和可交付成果。推荐方案及其理由：【待补充：方案比较依据】。"
+        ),
+        "value": (
+            "预期价值属于测算而非既有成绩。计算口径、假设与基准值："
+            "【待补充】，暂不填写未经验证的收益数字。"
+        ),
+        "risk": "推进前需核对资源、依赖及主要失败条件。试点安排与停止条件：【待确认】。",
+    },
+    "meeting-followup": {
+        "decisions": (
+            "关于{topic}，仅将会议明确确认的事项列为决定。已确认结论：【待补充：会议记录定位】。"
+        ),
+        "actions": (
+            "行动项按“任务—负责人—期限—状态”列示。"
+            "缺少负责人或时间的项目标记为【待确认】，不代拟承诺。"
+        ),
+        "dependencies": "记录执行所依赖的前置条件与协作支持。阻塞及影响：【待补充】。",
+        "confirm": "尚未形成决议的问题：【待补充】。请相关人员核对原始讨论后确认。",
+    },
+    "presentation-outline": {
+        "message": "本次演示围绕{topic}，希望{audience}{goal}。主张：【待补充：一句核心结论】。",
+        "storyline": (
+            "信息顺序为：需要解决的问题、支持判断的证据、可比较的选择。各环节材料：【待补充】。"
+        ),
+        "slides": "每页保留一个结论式标题，配以必要证据或图表。逐页要点及图表来源：【待补充】。",
+        "close": "最后明确需要听众作出的决定或反馈。决策请求与后续安排：【待确认】。",
+    },
+    "press-release": {
+        "headline": "{topic}",
+        "lead": (
+            "本稿报道{topic}。事件主体、发生时间、地点及最新进展：【待补充：已核实新闻事实】。"
+        ),
+        "body": "按新闻重要程度展开已核实细节。采访引语仅使用原始记录，发言者及出处：【待补充】。",
+        "background": (
+            "用于理解事件的相关背景：【待补充：公开资料及时间范围】。背景说明与当次事件分开陈述。"
+        ),
+    },
+    "wechat-article": {
+        "hook": "关于{topic}，这篇文章想帮{audience}厘清一个具体问题：{goal}。",
+        "context": (
+            "先从读者可能遇到的情境切入。场景与问题：【待补充：真实案例或明确标注的假设情境】。"
+        ),
+        "value": "区分已知事实、作者解读与可尝试的方法。核心信息：【待补充：支撑观点的材料】。",
+        "close": (
+            "读到这里，可先核对{topic}中与自身最相关的一项信息。进一步了解的资料入口：【待补充】。"
+        ),
+    },
+    "social-post": {
+        "hook": "聊聊{topic}：{goal}。",
+        "message": "这次只分享一个重点：【待补充：实际体验、观点及必要依据】。",
+        "action": "如果你也关注{topic}，欢迎交流具体问题与经验。",
+    },
+    "short-video-script": {
+        "hook": "关于{topic}，你最想弄清楚什么？这一段先讲{goal}。",
+        "beats": (
+            "口播先交代问题，再给必要信息，最后解释理由。各节拍内容：【待补充：可核实材料】。"
+        ),
+        "turn": "需要特别区分的是事实本身与对事实的解释。关键差异：【待补充】。",
+        "cta": "想继续了解{topic}，可查看【待补充：材料入口】或留下具体问题。",
+    },
+    "literature-review": {
+        "scope": "本综述聚焦{topic}，拟回答{goal}。概念界定、检索范围与文献纳入标准：【待补充】。",
+        "themes": (
+            "文献按研究问题、理论视角与研究方法组织，而非逐篇罗列。"
+            "主题分组及对应文献：【待补充：来源与页码】。"
+        ),
+        "debate": (
+            "对相关研究的比较应区分结论、样本、方法及适用条件。"
+            "共同证据与分歧：【待补充：逐项对应的文献依据】。"
+        ),
+        "gap": (
+            "研究空白需建立在实际检索与证据比较之上。尚未充分回答的问题："
+            "【待论证】，不以“首次”“填补空白”代替文献核查。"
+        ),
+    },
+    "research-outline": {
+        "question": (
+            "围绕{topic}，拟将{goal}转化为边界明确、可回答的研究问题。"
+            "研究对象与问题表述：【待补充】。"
+        ),
+        "framework": (
+            "核心概念、理论关系与分析单位：【待补充：定义及来源】。假设仅作为待检验命题。"
+        ),
+        "method": (
+            "资料来源、获取条件、样本范围与分析方法："
+            "【待确认】。研究设计与已完成的研究工作分开描述。"
+        ),
+        "chapters": (
+            "章节依次服务于问题提出、文献与框架、资料分析和讨论。"
+            "各章需要的证据及论证任务：【待补充】。"
+        ),
+    },
+    "research-abstract": {
+        "background": (
+            "本研究关注{topic}，研究目的为{goal}。背景问题与研究范围：【待补充：原文对应内容】。"
+        ),
+        "method": "方法：【待补充：原文中的研究设计、样本与分析方法】。未提供的方法不推测补写。",
+        "result": "结果：【待补充：原文已报告的主要发现及数据】。暂不推断方向、显著性或因果关系。",
+        "conclusion": "结论：【待补充：由原文结果支持的解释】。适用范围与限制应与研究设计一致。",
+    },
+    "reviewer-response": {
+        "thanks": (
+            "感谢审稿人对{topic}提出的建议。以下按原始意见逐条整理回复，修改状态以实际稿件为准。"
+        ),
+        "responses": (
+            "审稿意见：【待粘贴原文】。回应：【待补充："
+            "处理理由与证据】。不将计划修改表述为已经完成。"
+        ),
+        "changes": (
+            "修改内容与定位：【待核对：章节、页码、段落及修改前后文本】。确认后再列入回复。"
+        ),
+        "open": (
+            "仍需讨论的意见：【待确认】。如有不同判断，"
+            "应说明依据与方法边界，并保持尊重、具体的表达。"
+        ),
+    },
+}
+
+# Small lexical groups route excerpts conservatively. They never infer that a
+# plan is completed or that a supplied number is a research result.
+_SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
+    "done": ("完成", "交付", "验收", "上线"),
+    "progress": ("进行", "当前", "进度", "正在", "进展"),
+    "results": ("完成", "成果", "下降", "增长", "成效"),
+    "problems": ("问题", "不足", "风险", "重复"),
+    "risks": ("风险", "阻塞", "问题", "依赖", "延期"),
+    "next": ("下周", "计划", "下一步", "拟", "将"),
+    "action": ("请", "确认", "回复", "截止"),
+    "actions": ("负责", "期限", "完成", "任务"),
+    "method": ("方法", "样本", "访谈", "实验", "检索", "数据集"),
+    "result": ("结果", "发现", "显著", "置信", "效应"),
+    "conclusion": ("结论", "限制", "局限", "适用"),
+    "debate": ("分歧", "相比", "差异", "研究发现", "结果"),
+    "gap": ("不足", "局限", "尚未", "空白"),
+    "responses": ("意见", "审稿", "建议"),
+    "changes": ("修改", "页", "段落", "章节"),
+}
+
+
 def _deterministic_blocks(
     brief: WritingBrief,
     recipe: RecipeDefinition,
@@ -258,66 +424,185 @@ def _deterministic_blocks(
     title: str,
 ) -> tuple[ContentBlock, ...]:
     blocks: list[ContentBlock] = []
-    fact_knowledge = tuple(item for item in knowledge if item.kind != "style_reference")
+    facts = tuple(item for item in knowledge if item.kind != "style_reference")
+    assignments = _section_excerpts(recipe.sections, facts, academic=recipe.pack_id == "academic")
     for section_index, section in enumerate(recipe.sections):
-        heading_order = len(blocks)
         blocks.append(
             ContentBlock(
                 id=_stable_id("block", brief.id, title, section.id, "heading"),
                 kind="heading",
-                order=heading_order,
+                order=len(blocks),
                 text=section.title,
                 heading_level=1,
             )
         )
-        reference = fact_knowledge[section_index % len(fact_knowledge)] if fact_knowledge else None
-        paragraph = _deterministic_paragraph(
-            brief,
-            section_title=section.title,
-            section_purpose=section.purpose,
-            reference=reference,
-            first=section_index == 0,
-        )
+        selected = assignments[section_index]
+        paragraph = _deterministic_paragraph(brief, recipe, section, selected)
         blocks.append(
             ContentBlock(
                 id=_stable_id("block", brief.id, title, section.id, paragraph),
                 kind="paragraph",
                 order=len(blocks),
                 text=paragraph,
-                knowledge_item_ids=(reference.id,) if reference is not None else (),
+                knowledge_item_ids=tuple(dict.fromkeys(item.id for item, _ in selected)),
+            )
+        )
+    constraints = tuple(
+        clause
+        for value in brief.constraints
+        if (clause := _normalize_text(value).rstrip("。！？；;，,. "))
+    )
+    if constraints:
+        text = "写作约定（交付前核对）：" + "；".join(constraints) + "。"
+        blocks.append(
+            ContentBlock(
+                id=_stable_id("block", brief.id, title, "constraints", text),
+                kind="callout",
+                order=len(blocks),
+                text=text,
             )
         )
     return tuple(blocks)
 
 
+_ACADEMIC_PACK_MARKER = "【已导入学术材料包】"
+_ACADEMIC_EVIDENCE_BLOCK = re.compile(
+    r"^\[证据[ \t]+[^\]\n]+\][ \t]*[^\n]*(?:\n(?!\[(?:文献|证据)[ \t])[^\n]*)*",
+    re.MULTILINE,
+)
+_ACADEMIC_METADATA_LINE = re.compile(r"^\[文献[ \t]+[^\]\n]+\][^\n]*", re.MULTILINE)
+
+
+def _academic_material_units(content: str) -> tuple[str, ...]:
+    """Prioritize real imported snippets and exclude bibliographic boilerplate.
+
+    The web workspace currently serializes its typed EvidenceSnippet records
+    into one bounded KnowledgeItem. Preserve each marked evidence block as one
+    unit rather than letting preceding metadata fill all paragraph slots. The
+    explicit marker is a data-format delimiter, never an instruction to execute.
+    """
+
+    prefix, marker, package = content.partition(_ACADEMIC_PACK_MARKER)
+    if not marker:
+        return tuple(re.findall(r"[^。！？\n]+[。！？]?", content))
+    snippets = tuple(match.group(0).strip() for match in _ACADEMIC_EVIDENCE_BLOCK.finditer(package))
+    # This known built-in example is writing-task guidance, not research data.
+    context = "" if prefix.lstrip().startswith("示例任务：") else prefix
+    contextual_units = tuple(re.findall(r"[^。！？\n]+[。！？]?", context))
+    return (*snippets, *contextual_units)
+
+
+def _academic_metadata(content: str) -> tuple[str, ...]:
+    _, marker, package = content.partition(_ACADEMIC_PACK_MARKER)
+    if not marker:
+        return ()
+    return tuple(match.group(0).strip() for match in _ACADEMIC_METADATA_LINE.finditer(package))
+
+
+def _bounded_material_excerpt(raw: str, *, academic: bool, limit: int = 480) -> str:
+    """Bound snippet prose, not its identity or original source locator.
+
+    A bounded excerpt is not a complete quotation. Keep the annotation outside
+    the original prose and explicitly disclose truncation before displaying it.
+    """
+
+    text = _normalize_text(raw)
+    header_match = re.match(r"^\[证据[ \t]+[^\]\n]+\]", text) if academic else None
+    if header_match is None:
+        return _excerpt(text, limit=limit)
+    header = header_match.group(0)
+    body = text[header_match.end() :].strip()
+    locator_match = re.search(r"(?:^|\n)(定位[：:][^\n]*)$", body)
+    locator = locator_match.group(1) if locator_match is not None else ""
+    if locator_match is not None:
+        body = body[: locator_match.start()].rstrip()
+    if len(body) <= limit:
+        return text
+    excerpt = _excerpt(body, limit=limit)
+    disclosure = "【原文节选提示：下文已截断，不代表完整引文；请回查原始证据及上下文。】"
+    parts = (header, disclosure, excerpt, locator)
+    return "\n".join(part for part in parts if part)
+
+
+def _section_excerpts(
+    sections: tuple[RecipeSection, ...],
+    facts: tuple[KnowledgeItem, ...],
+    *,
+    academic: bool = False,
+) -> tuple[tuple[tuple[KnowledgeItem, str], ...], ...]:
+    assignments: list[list[tuple[KnowledgeItem, str]]] = [[] for _ in sections]
+    seen: set[str] = set()
+    # Collect marked research evidence across *all* materials before contextual
+    # notes so that early metadata or long task descriptions cannot exhaust the
+    # limited excerpt slots. A snippet stays atomic, including its source IDs.
+    material_units = [
+        (item, unit)
+        for item in facts
+        for unit in (
+            _academic_material_units(item.content)
+            if academic
+            else tuple(re.findall(r"[^。！？\n]+[。！？]?", item.content))
+        )
+    ]
+    if academic:
+        material_units.sort(key=lambda pair: not pair[1].startswith("[证据 "))
+    for item, raw in material_units:
+        text = _bounded_material_excerpt(raw, academic=academic)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        scores = [sum(term in text for term in _SECTION_ANCHORS.get(s.id, ())) for s in sections]
+        best = max(scores, default=0)
+        if best:
+            index = min(
+                (i for i, score in enumerate(scores) if score == best),
+                key=lambda i: (len(assignments[i]), i),
+            )
+        else:
+            # Unclassified facts remain together as context, not fabricated
+            # as section-specific results, conclusions or commitments.
+            index = next(
+                (
+                    i
+                    for i, section in enumerate(sections)
+                    if section.id
+                    in {
+                        "details",
+                        "context",
+                        "scope",
+                        "overview",
+                        "body",
+                        "themes",
+                        "background",
+                    }
+                ),
+                0,
+            )
+        if len(assignments[index]) < 3:
+            assignments[index].append((item, text))
+    return tuple(tuple(group) for group in assignments)
+
+
 def _deterministic_paragraph(
     brief: WritingBrief,
-    *,
-    section_title: str,
-    section_purpose: str,
-    reference: KnowledgeItem | None,
-    first: bool,
+    recipe: RecipeDefinition,
+    section: RecipeSection,
+    references: tuple[tuple[KnowledgeItem, str], ...],
 ) -> str:
-    prefix = (
-        f"围绕“{brief.title}”，面向{brief.audience}，重点实现{_sentence(brief.goal)}"
-        if first
-        else f"围绕{section_title}，{_sentence(section_purpose)}"
+    template = _SECTION_COPY.get(recipe.id, {}).get(section.id)
+    if template is None:
+        template = "{section}：{purpose}所需事实与依据：【待补充】。"
+    paragraph = template.format(
+        topic=brief.title,
+        goal=brief.goal.rstrip("。！？；;，,. "),
+        audience=brief.audience,
+        section=section.title,
+        purpose=_sentence(section.purpose),
     )
-    if reference is None:
-        evidence = "具体事实、数据、时间和责任主体请按【待补充】标记补齐。"
-    else:
-        excerpt = _excerpt(reference.content, limit=480)
-        evidence = f"参考《{reference.title}》所载材料：{excerpt}"
-    constraints = ""
-    if brief.constraints:
-        clauses = tuple(
-            clause
-            for value in brief.constraints
-            if (clause := _normalize_text(value).rstrip("。！？；;，,. "))
-        )
-        if clauses:
-            constraints = " 写作时同时遵循：" + "；".join(clauses) + "。"
-    return _normalize_text(prefix + evidence + constraints)
+    if references:
+        excerpts = "\n".join(f"材料提要《{item.title}》：{text}" for item, text in references)
+        paragraph += "\n" + excerpts
+    return _normalize_text(paragraph)
 
 
 def _blocks_from_live_draft(
@@ -334,7 +619,12 @@ def _blocks_from_live_draft(
     returned_ids = tuple(section.id for section in payload.sections)
     if returned_ids != expected_ids:
         raise ModelCompositionOutputError("模型结果未按写作配方返回完整有序章节")
-    knowledge_ids = tuple(item.id for item in knowledge if item.kind != "style_reference")
+    knowledge_ids = tuple(
+        item.id
+        for item in knowledge
+        if item.kind != "style_reference"
+        and (recipe.pack_id != "academic" or _academic_material_units(item.content))
+    )
     blocks: list[ContentBlock] = []
     for definition, section in zip(recipe.sections, payload.sections, strict=True):
         blocks.append(
@@ -377,10 +667,58 @@ def _deterministic_variant_blocks(
         )[:12]
         texts = tuple(("list", f"• {summary}", None) for summary in summaries)
     elif target_channel == "email":
+        academic = scenario_for_document_type(source.content_type).id == "academic"
         texts = (
-            ("paragraph", f"您好：现将“{source.title}”有关内容说明如下。", None),
+            (
+                "paragraph",
+                f"您好，随信分享《{source.title}》的{'研究材料' if academic else '相关信息'}。",
+                None,
+            ),
             ("paragraph", _excerpt(source_text, limit=2_000), None),
-            ("action_item", "请结合实际确认后续安排与完成时间。", None),
+            (
+                "action_item",
+                "希望获得的反馈：【待确认：研究问题、论证或修改建议】。"
+                if academic
+                else "需要您确认的事项：【待补充：具体请求】；期望回复时间：【待确认】。",
+                None,
+            ),
+        )
+    elif target_channel == "academic":
+        texts = (
+            ("heading", "问题与材料范围", 1),
+            (
+                "paragraph",
+                f"本材料围绕《{source.title}》整理已有信息，尚不据此宣称完成了独立研究。",
+                None,
+            ),
+            ("heading", "已有内容与证据", 1),
+            ("paragraph", _excerpt(source_text, limit=4_000), None),
+            ("heading", "待核查的论证与引用", 1),
+            (
+                "paragraph",
+                "研究问题、方法、结果与引文需逐项回查原始材料。资料未包含的研究结论和参考文献保留为【待补充】。",
+                None,
+            ),
+        )
+    elif target_channel == "meeting":
+        texts = (
+            ("heading", "供讨论的信息", 1),
+            ("paragraph", _excerpt(source_text, limit=2_000), None),
+            ("heading", "待确认事项", 1),
+            (
+                "action_item",
+                "请核对需讨论的问题及决定；原稿未明确的负责人、期限与任务状态均标记为【待确认】。",
+                None,
+            ),
+        )
+    elif target_channel == "web":
+        texts = (
+            ("paragraph", _excerpt(source_text, limit=480), None),
+            *(
+                (block.kind, block.text, block.heading_level)
+                for block in source.blocks
+                if block.kind != "title" and block.text
+            ),
         )
     else:
         texts = tuple(
@@ -434,12 +772,16 @@ def _composition_prompts(
         "对象必须且只能包含title和sections；sections每项必须且只能包含id和content。"
         "严格使用给定章节id及顺序，标题保持不变。事实、数字、日期、名称和引文只能来自"
         "给定事实材料；依据不足时使用【待补充】。写法参考只用于结构、语气和句式特征，"
-        "不得把其中事实写入成稿。"
+        "不得把其中事实写入成稿。不同章节承担不同论证任务，不重复抄写任务简报或硬性约束。"
+        "bibliographic_metadata仅用于识别来源，不是研究证据；学术主张应来自knowledge中的原文片段。"
+        + "场景写作要求："
+        + "；".join(get_scenario_profile(recipe.pack_id).prompt_guidance)
     )
     fact_knowledge = tuple(item for item in knowledge if item.kind != "style_reference")
     style_references = tuple(item for item in knowledge if item.kind == "style_reference")
     request = {
         "brief": brief.model_dump(mode="json"),
+        "scenario": get_scenario_profile(recipe.pack_id).model_dump(mode="json"),
         "title": title,
         "recipe": {
             "id": recipe.id,
@@ -454,9 +796,17 @@ def _composition_prompts(
                 "id": item.id,
                 "title": item.title,
                 "kind": item.kind,
-                "content": item.content,
+                "content": "\n\n".join(_academic_material_units(item.content))
+                if recipe.pack_id == "academic"
+                else item.content,
             }
             for item in fact_knowledge
+            if recipe.pack_id != "academic" or _academic_material_units(item.content)
+        ],
+        "bibliographic_metadata": [
+            {"knowledge_item_id": item.id, "records": list(_academic_metadata(item.content))}
+            for item in fact_knowledge
+            if recipe.pack_id == "academic" and _academic_metadata(item.content)
         ],
         "style_references": [
             {
@@ -481,6 +831,9 @@ def _variant_prompts(
         "你是砚章渠道改编引擎。仅输出一个JSON对象，不得输出Markdown。"
         "对象必须且只能包含title和blocks；每个block必须且只能包含kind、text、"
         "heading_level。标题保持不变，不新增原稿没有的事实。"
+        + "来源场景要求："
+        + "；".join(scenario_for_document_type(source.content_type).prompt_guidance)
+        + "目标为学术渠道时，采用问题、依据与边界的表达，不将宣传性判断改写成研究结论。"
     )
     request = {
         "title": title,

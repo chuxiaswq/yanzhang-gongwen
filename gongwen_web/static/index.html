@@ -9,7 +9,10 @@
     />
     <title>砚章 · AI文字工作台</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/scenario_catalog.js" defer></script>
+    <script src="/static/scenario_workspace.js" defer></script>
     <script src="/static/workspace_context.js" defer></script>
+    <script src="/static/execution_mode.js" defer></script>
     <script src="/static/response_validators.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
@@ -95,6 +98,14 @@
             <span class="project-context-status" id="projectContextStatus">尚未选择</span>
           </div>
         </nav>
+        <section class="engine-banner" id="engineBanner" aria-label="当前生成方式">
+          <div class="engine-banner-copy" aria-live="polite">
+            <strong class="engine-banner-title" id="engineBannerTitle">模板演示 · 未调用大模型</strong>
+            <span class="engine-banner-detail" id="engineBannerDetail">使用内置模板、写作公式和规则评分，不消耗模型 Token。</span>
+          </div>
+          <button class="engine-banner-action" id="engineBannerButton" type="button">模型详情</button>
+          <button class="service-retry-button" id="retryConnectionButton" type="button" hidden>重新连接服务</button>
+        </section>
       </header>
 
       <div class="route-stage" id="routeStage">
@@ -150,7 +161,7 @@
                 <div class="brief-preview" id="homeBriefPreview">
                   <strong>尚未命名的写作任务</strong>
                   <p>补充主题、目标和阅读对象后，砚章会将它们贯穿标题、母稿、审校与渠道变体。</p>
-                  <div><span>规范公文</span><span>标准篇幅</span><span>中文</span></div>
+                  <div><span>按场景写作</span><span>标准篇幅</span><span>中文</span></div>
                 </div>
               </section>
               <section class="dashboard-card capability-card" aria-labelledby="capabilityHeading">
@@ -190,9 +201,25 @@
             <button class="mini-button" id="loadExampleButton" type="button">填入示例</button>
           </div>
 
+          <section class="scenario-overview" id="scenarioOverview" data-scenario="gongwen" aria-labelledby="scenarioName">
+            <div class="scenario-overview-heading">
+              <span class="eyebrow">先选场景，再开始写作</span>
+              <span class="scenario-linkage-badge">整组联动</span>
+            </div>
+            <label class="field scenario-select-field">
+              <span>写作场景</span>
+              <select id="briefScenarioPack" aria-describedby="scenarioDescription"><option value="gongwen">公文与综合材料</option><option value="workplace">职场沟通</option><option value="media">媒体内容</option><option value="academic">学术研究</option></select>
+            </label>
+            <div class="scenario-overview-copy" aria-live="polite">
+              <h3 id="scenarioName">公文与综合材料</h3>
+              <p id="scenarioDescription">场景决定配方、表达方法、语气、参考资料与审校标准；切换后整组同步，不再混用其他场景的写法。</p>
+              <div class="scenario-capabilities" id="scenarioCapabilities"><span>结构与配方</span><span>表达方法</span><span>材料与审校</span></div>
+            </div>
+          </section>
+
           <details class="universal-brief" id="briefCard" open>
             <summary>
-              <span><i>简</i><b>通用任务简报</b><small>一次填写，贯穿母稿、变体与审校</small></span>
+              <span><i>01</i><b>任务与交付</b><small>确定要写什么，以及写给谁</small></span>
               <em
                 id="briefCompletion"
                 title="统计主题、写作目的、阅读对象、内容形态、首要渠道和写作配方"
@@ -201,23 +228,24 @@
             </summary>
             <div class="brief-fields">
               <div class="brief-context-note">
-                <span>核心任务</span>
-                <p>主题、目标和阅读对象沿用下方写作设置；这里补充内容形态与交付渠道。日期、关键词和约束均为选填项。</p>
+                <p>配方与交付渠道随场景匹配，主题、目标和阅读对象在下方填写。日期、关键词和约束均为选填项。</p>
               </div>
               <div class="form-row split">
-                <label class="field compact-field"><span>内容形态</span><select id="briefContentType"><option value="official-document">规范公文</option><option value="leadership-speech">领导讲话</option><option value="research-report">调研报告</option><option value="news-release">新闻通稿</option><option value="academic-paper">学术论文</option><option value="general-writing">通用长文</option></select></label>
-                <label class="field compact-field"><span>首要渠道</span><select id="briefChannel"><option value="document">机关文件</option><option value="email">工作邮件</option><option value="meeting">会议使用</option><option value="presentation">汇报演示</option><option value="web">门户网站</option><option value="social">政务新媒体</option><option value="academic">学术期刊</option></select></label>
-              </div>
-              <div class="form-row split">
-                <label class="field compact-field"><span>场景包</span><select id="briefScenarioPack"><option value="gongwen">公文与综合材料</option><option value="workplace">职场沟通</option><option value="media">媒体内容</option><option value="academic">学术研究</option></select></label>
                 <label class="field compact-field"><span>写作配方</span><select id="briefRecipe"><option value="implementation-plan">实施方案</option><option value="work-summary">工作总结</option><option value="briefing-material">汇报材料</option><option value="meeting-minutes">会议纪要</option></select></label>
+                <label class="field compact-field"><span>内容形态</span><select id="briefContentType"><option value="official-document">规范公文</option><option value="leadership-speech">领导讲话</option><option value="research-report">调研报告</option><option value="news-release">新闻通稿</option><option value="academic-paper">学术论文</option><option value="general-writing">通用长文</option></select></label>
               </div>
               <div class="form-row split">
-                <label class="field compact-field"><span>交付日期 <i class="optional-label">选填</i></span><input id="briefDeadline" type="text" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="YYYY-MM-DD" aria-label="交付日期，格式为年-月-日" /></label>
+                <label class="field compact-field"><span>首要渠道</span><select id="briefChannel"><option value="document">正式文档</option><option value="email">工作邮件</option><option value="meeting">会议使用</option><option value="presentation">汇报演示</option><option value="web">网站发布</option><option value="social">社交媒体</option><option value="academic">学术期刊</option></select></label>
                 <label class="field compact-field"><span>目标语言</span><select id="briefLanguage"><option value="zh-CN">中文</option><option value="zh-en">中英双语</option><option value="en">英文</option></select></label>
               </div>
-              <label class="field compact-field"><span>表达关键词</span><input id="briefKeywords" maxlength="180" placeholder="例如：务实、改革、为民、闭环" /></label>
+              <details class="brief-advanced" id="briefAdvancedSettings">
+                <summary>补充日期、关键词与约束 <span>选填</span></summary>
+                <div class="brief-advanced-fields">
+                  <label class="field compact-field"><span>交付日期 <i class="optional-label">选填</i></span><input id="briefDeadline" type="text" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="YYYY-MM-DD" aria-label="交付日期，格式为年-月-日" /></label>
+                  <label class="field compact-field"><span id="keywordsLabel">表达关键词</span><input id="briefKeywords" maxlength="180" placeholder="例如：清晰、具体、有据、可执行" /></label>
                 <label class="field compact-field"><span>硬性约束</span><textarea id="briefConstraints" rows="2" maxlength="500" placeholder="例如：保留指定表述；所有数字须有来源；不超 2000 字"></textarea></label>
+                </div>
+              </details>
               <div class="brief-actions">
                 <span id="briefStatus">仅在主动提交时调用服务</span>
                 <span class="brief-action-buttons">
@@ -256,39 +284,32 @@
             </div>
 
             <label class="field required-field">
-              <span>写作主题</span>
-              <input id="topic" name="topic" maxlength="120" placeholder="例如：推进数字政府建设提质增效" />
+              <span id="topicLabel">写作主题</span>
+              <input id="topic" name="topic" maxlength="120" placeholder="这次要解决什么问题，或说明什么事情？" />
               <small><b id="topicCount">0</b>/120</small>
             </label>
 
             <label class="field">
-              <span>写作目的</span>
-              <input id="purpose" name="purpose" maxlength="2000" placeholder="例如：明确年度重点任务和责任分工" />
+              <span id="purposeLabel">写作目的</span>
+              <input id="purpose" name="purpose" maxlength="2000" placeholder="希望读者理解什么，或采取什么行动？" />
             </label>
 
             <label class="field">
-              <span>阅读对象</span>
-              <input id="audience" name="audience" maxlength="500" placeholder="例如：各处室、各直属单位" />
+              <span id="audienceLabel">阅读对象</span>
+              <input id="audience" name="audience" maxlength="500" placeholder="谁会读这份内容？需要了解哪些背景？" />
             </label>
 
             <div class="field">
               <span>行文语气</span>
-              <div class="segmented" id="toneSelector" role="radiogroup" aria-label="行文语气">
-                <label><input type="radio" name="tone" value="严谨规范" checked /><span>严谨规范</span></label>
-                <label><input type="radio" name="tone" value="凝练有力" /><span>凝练有力</span></label>
-                <label><input type="radio" name="tone" value="务实亲切" /><span>务实亲切</span></label>
-              </div>
+              <div class="segmented" id="toneSelector" role="radiogroup" aria-label="行文语气"></div>
             </div>
 
-            <label class="field">
-              <span>写法参考</span>
-              <select id="referenceStyle" name="reference_style">
-                <option value="权威媒体综合写法" selected>权威媒体综合写法</option>
-                <option value="人民日报式消息评论">人民日报式消息评论</option>
-                <option value="光明日报式理性阐释">光明日报式理性阐释</option>
-                <option value="求是式理论论证">求是式理论论证</option>
+            <label class="field expression-method-field">
+              <span id="referenceStyleLabel">表达方法 / 风格</span>
+              <select id="referenceStyle" name="reference_style" aria-describedby="referenceStyleDescription">
+                <option value="">正在载入当前场景的表达方法……</option>
               </select>
-              <small class="field-note">仅参考结构、语气和句式特征，不复制来源正文。</small>
+              <small class="field-note" id="referenceStyleDescription">选择适合当前任务的表达方法；风格与事实来源分别管理。</small>
             </label>
 
             <section class="methodology-section" aria-labelledby="methodologyHeading">
@@ -297,7 +318,7 @@
                   <span class="eyebrow">内容骨架</span>
                   <h3 id="methodologyHeading">结构方法论</h3>
                 </div>
-                <span class="method-badge">随文种匹配</span>
+                <span class="method-badge">随场景与配方匹配</span>
               </div>
               <label class="field compact-field">
                 <span>选择成文路径</span>
@@ -306,7 +327,7 @@
                 </select>
               </label>
               <p class="methodology-description" id="methodologyDescription">
-                系统会根据文种匹配章节顺序、论证逻辑与事实使用规则。
+                系统根据当前场景与配方匹配章节顺序、论证逻辑与事实使用规则。
               </p>
               <details class="custom-methodology" id="customMethodologyDetails">
                 <summary>自定义结构公式 / 步骤</summary>
@@ -326,26 +347,31 @@
 
             <section class="reference-picker" aria-labelledby="referencePickerTitle">
               <div class="reference-picker-heading">
-                <div><span class="eyebrow">本地知识库</span><h3 id="referencePickerTitle">文章来源库</h3></div>
-                <button class="mini-button" id="openArticleLibraryButton" type="button">选择文章</button>
+                <div><span class="eyebrow">02 · 组织依据</span><h3 id="referencePickerTitle">场景参考资料</h3></div>
+                <button class="mini-button" id="openArticleLibraryButton" type="button">选择参考</button>
               </div>
-              <p>文章正文保存在本机资料库；生成时仅使用短摘录与写法特征，且不作为事实依据。</p>
-              <div class="selected-references empty" id="selectedReferences">尚未选择参考文章</div>
+              <p id="referencePickerDescription">按当前任务选择资料：表达参考帮助组织写法，原始材料和文献用于支撑事实与论断。</p>
+              <div class="scene-reference-actions" id="sceneReferenceActions">
+                <button class="scene-reference-action" id="openProjectMaterialsButton" type="button"><span aria-hidden="true">＋</span> 项目材料</button>
+                <button class="scene-reference-action" id="openAcademicReferencesButton" type="button"><span aria-hidden="true">↗</span> 参考文献</button>
+              </div>
+              <p class="scene-evidence-note" id="sceneEvidenceNote" hidden>学术论断以真实文献和证据片段为依据，写作风格和媒体文章不替代学术证据。</p>
+              <div class="selected-references empty" id="selectedReferences">尚未选择参考资料</div>
             </section>
 
             <label class="field">
-              <span class="label-row">具体要求 <button class="link-button" id="clearRequirements" type="button">清空</button></span>
+              <span class="label-row"><span id="requirementsLabel">具体要求</span> <button class="link-button" id="clearRequirements" type="button">清空</button></span>
               <textarea id="requirements" name="requirements" rows="4" maxlength="4000" placeholder="需要强调的重点、结构、时间范围，或必须保留的表述……"></textarea>
             </label>
 
-            <div class="section-divider"><span>参考材料</span></div>
+            <div class="section-divider"><span id="materialSectionLabel">事实与原始材料</span></div>
 
             <label class="field material-field">
               <span class="label-row">
-                粘贴原始材料
-                <span class="help-tip" data-tip="材料仅保存在当前浏览器，发送模型时将随本次请求提交。">?</span>
+                <span id="materialsLabel">粘贴原始材料</span>
+                <span class="help-tip" data-tip="草稿先保存在浏览器；保存项目时材料写入当前服务器。仅真实模型步骤会向所配模型发送本次任务材料。">?</span>
               </span>
-              <textarea id="materials" name="materials" rows="7" placeholder="粘贴会议记录、政策要点、历史文稿或数据材料。内容越具体，生成结果越可靠。"></textarea>
+              <textarea id="materials" name="materials" rows="7" placeholder="粘贴与当前任务有关的记录、数据、文献摘录或事实依据。内容越具体，生成结果越可靠。"></textarea>
               <span class="textarea-footer"><b id="materialCount">0</b> 字</span>
             </label>
 
@@ -451,7 +477,7 @@
             <div class="title-generation-bar">
               <div class="title-candidate-state">
                 <strong id="titleCandidateSummary">尚未生成标题</strong>
-                <span>候选将按综合评分由高到低排列</span>
+                <span id="titleExecution">候选将按综合评分由高到低排列；分数仅作写法参考</span>
               </div>
               <label class="inline-select"><span>排序</span><select id="titleSort"><option value="score">综合评分</option><option value="compliance">文种规范</option><option value="relevance">主题相关</option><option value="concision">简洁凝练</option></select></label>
               <button class="primary-button" id="generateTitlesButton" type="button">
@@ -471,7 +497,7 @@
                 <h2 id="expressionLabHeading">表达焦点实验室</h2>
                 <p>标题、开头、小标题和段首句分开推演，再放回母稿。</p>
               </div>
-              <span class="focus-lab-badge">可独立调用</span>
+              <span class="focus-lab-badge">本地规则 · 无大模型</span>
             </div>
             <div class="focus-tabs" id="expressionFocusTabs" role="tablist" aria-label="表达位置">
               <button class="is-active" type="button" role="tab" aria-selected="true" data-expression-focus="title">标题</button>
@@ -480,7 +506,7 @@
               <button type="button" role="tab" aria-selected="false" data-expression-focus="topic_sentence">段首句</button>
             </div>
             <div class="focus-control-row">
-              <label class="field"><span>聚焦要求</span><input id="expressionInstruction" maxlength="300" placeholder="例如：用三组排比，体现为民、务实、担当" /></label>
+                <label class="field"><span>聚焦要求</span><input id="expressionInstruction" maxlength="300" placeholder="例如：首句先给结论，再用证据解释；避免空泛表达" /></label>
               <label class="field compact-field"><span>候选数量</span><select id="expressionCount"><option value="3">3 个</option><option value="5" selected>5 个</option><option value="8">8 个</option></select></label>
               <button class="primary-button" id="generateExpressionsButton" type="button">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 1.4 4.3a2 2 0 0 0 1.3 1.3L19 10l-4.3 1.4a2 2 0 0 0-1.3 1.3L12 17l-1.4-4.3a2 2 0 0 0-1.3-1.3L5 10l4.3-1.4a2 2 0 0 0 1.3-1.3L12 3Z"/></svg>
@@ -498,7 +524,7 @@
             <p>填写左侧主题和参考材料，砚章将依次生成标题、提纲与正文，并检查事实一致性。</p>
             <button class="primary-button large" id="generateButton" type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 1.4 4.3a2 2 0 0 0 1.3 1.3L19 10l-4.3 1.4a2 2 0 0 0-1.3 1.3L12 17l-1.4-4.3a2 2 0 0 0-1.3-1.3L5 10l4.3-1.4a2 2 0 0 0 1.3-1.3L12 3Z"/><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z"/></svg>
-              生成公文初稿
+              <span id="generateButtonLabel">生成当前任务初稿</span>
               <span class="shortcut-hint">⌘ ↵</span>
             </button>
           </div>
@@ -522,7 +548,8 @@
                     <span id="paperType">实施方案</span>
                     <span id="documentContextStatus">草稿</span>
                   </div>
-                  <textarea class="paper-title" id="documentTitle" rows="2" maxlength="300" aria-label="公文标题" placeholder="在此输入标题"></textarea>
+                  <p class="document-execution" id="documentExecution" aria-live="polite">文稿来源：尚无生成记录</p>
+                  <textarea class="paper-title" id="documentTitle" rows="2" maxlength="300" aria-label="文稿标题" placeholder="在此输入标题"></textarea>
                   <div
                     class="paper-body"
                     id="documentEditor"
@@ -550,12 +577,12 @@
             <div class="variant-studio-body">
               <fieldset class="channel-options" id="variantChannels">
                 <legend>选择交付渠道</legend>
-                <label><input type="checkbox" value="document" checked /><span><b>机关文件</b><small>规范结构 · 正式交付</small></span></label>
+                <label><input type="checkbox" value="document" checked /><span><b>正式文档</b><small>清晰结构 · 完整交付</small></span></label>
                 <label><input type="checkbox" value="email" /><span><b>工作邮件</b><small>结论前置 · 行动清晰</small></span></label>
                 <label><input type="checkbox" value="meeting" /><span><b>会议使用</b><small>议题聚焦 · 责任明确</small></span></label>
                 <label><input type="checkbox" value="presentation" /><span><b>汇报演示</b><small>逐页单点 · 结论先行</small></span></label>
                 <label><input type="checkbox" value="web" /><span><b>门户网站</b><small>导语清晰 · 事实优先</small></span></label>
-                <label><input type="checkbox" value="social" /><span><b>政务新媒体</b><small>短句分层 · 易读传播</small></span></label>
+                <label><input type="checkbox" value="social" /><span><b>社交媒体</b><small>短句分层 · 易读传播</small></span></label>
                 <label><input type="checkbox" value="academic" /><span><b>学术文本</b><small>问题方法 · 引用规范</small></span></label>
               </fieldset>
               <div class="variant-controls">
@@ -626,13 +653,13 @@
             </div>
 
             <details class="checklist" open>
-              <summary>快速自检清单 <span id="checkProgress">0/6</span></summary>
-              <label><input type="checkbox" /> 文种和行文关系正确</label>
-              <label><input type="checkbox" /> 标题准确概括正文</label>
-              <label><input type="checkbox" /> 事实、数字均有材料依据</label>
-              <label><input type="checkbox" /> 各级标题结构平行</label>
-              <label><input type="checkbox" /> 任务包含责任与时限</label>
-              <label><input type="checkbox" /> 已完成人工复核</label>
+              <summary>当前场景自检 <span id="checkProgress">0/6</span></summary>
+              <label><input type="checkbox" /> <span id="checklistLabel0">目标与阅读对象明确</span></label>
+              <label><input type="checkbox" /> <span id="checklistLabel1">标题准确概括正文</span></label>
+              <label><input type="checkbox" /> <span id="checklistLabel2">事实、数字均有材料依据</span></label>
+              <label><input type="checkbox" /> <span id="checklistLabel3">结构与表达符合任务</span></label>
+              <label><input type="checkbox" /> <span id="checklistLabel4">结论与行动有据可查</span></label>
+              <label><input type="checkbox" /> <span id="checklistLabel5">已完成人工复核</span></label>
             </details>
           </section>
 
@@ -659,7 +686,7 @@
             </div>
 
             <div class="export-meta">
-              <label class="field"><span>发文单位（选填）</span><input id="issuingOrg" placeholder="××单位" /></label>
+              <label class="field"><span>单位 / 作者信息（选填）</span><input id="issuingOrg" placeholder="单位、团队或作者" /></label>
               <label class="field"><span>成文日期</span><input id="issueDate" type="date" /></label>
             </div>
 
@@ -692,9 +719,9 @@
             </header>
 
             <div class="asset-overview-grid">
-              <article class="asset-stat"><span>权威文章</span><strong id="knowledgeItemCount">—</strong><small>本机文章来源库</small></article>
-              <article class="asset-stat"><span>已选写法参考</span><strong id="knowledgeSelectedCount">0</strong><small>用于结构和语气，不充当事实</small></article>
-              <article class="asset-stat"><span>当前事实卡</span><strong id="knowledgeFactCount">0</strong><small>日期、数字、机构与任务</small></article>
+              <article class="asset-stat"><span id="knowledgeItemLabel">媒体参考文章</span><strong id="knowledgeItemCount">—</strong><small>与项目事实材料分别管理</small></article>
+              <article class="asset-stat"><span id="knowledgeSelectedLabel">已选写法参考</span><strong id="knowledgeSelectedCount">0</strong><small>用于结构和语气，不充当事实</small></article>
+              <article class="asset-stat"><span id="knowledgeFactLabel">当前事实卡</span><strong id="knowledgeFactCount">0</strong><small>日期、数字、机构与任务</small></article>
               <article class="asset-stat"><span>数据边界</span><strong>本机优先</strong><small>主动调用时才提交所选内容</small></article>
             </div>
 
@@ -702,7 +729,7 @@
               <section class="portal-card knowledge-search-card">
                 <div class="portal-card-heading"><div><span class="eyebrow">统一检索</span><h2>查找知识条目</h2></div><span class="v2-mark">项目资料检索</span></div>
                 <div class="knowledge-search-controls">
-                  <label class="field"><span>关键词</span><input id="knowledgeSearch" placeholder="输入主题、机构、政策或观点" /></label>
+                  <label class="field"><span>关键词</span><input id="knowledgeSearch" placeholder="输入项目主题、产品、研究问题或关键词" /></label>
                   <label class="field compact-field"><span>材料类型</span><select id="knowledgeKind"><option value="">全部类型</option><option value="source">来源材料</option><option value="style_reference">写法参考</option><option value="prior_asset">历史文稿</option><option value="terminology">术语规范</option><option value="note">个人笔记</option></select></label>
                   <button class="primary-button" id="searchKnowledgeButton" type="button">检索</button>
                 </div>
@@ -722,9 +749,10 @@
               </section>
 
               <aside class="source-gateway">
-                <article class="source-gateway-card"><i>权</i><div><strong>权威文章库</strong><p>显式导入文章链接，或按关键词、日期和来源范围采集。</p><button class="link-button" id="knowledgeCollectButton" type="button">选择与采集 →</button></div></article>
-                <article class="source-gateway-card"><i>稿</i><div><strong>历史文稿库</strong><p>复用服务端文稿、版本与已确认的组织表达。</p><button class="link-button" id="knowledgeServerButton" type="button">查看服务端文稿 →</button></div></article>
+                <article class="source-gateway-card is-primary"><i>材</i><div><strong>当前项目材料</strong><p>整理会议记录、业务数据、产品资料与研究笔记，为当前任务建立可核验依据。</p><button class="link-button" type="button" data-open-view="knowledge" data-project-focus="projectMaterialComposer">添加项目材料 →</button></div></article>
                 <article class="source-gateway-card"><i>文</i><div><strong>学术参考文献</strong><p>导入 BibTeX、RIS 或 CSL-JSON，形成文献矩阵与证据链。</p><button class="link-button" type="button" data-open-view="academic">进入学术研究 →</button></div></article>
+                <article class="source-gateway-card"><i>稿</i><div><strong>历史文稿库</strong><p>复用服务端文稿、版本与已确认的组织表达。</p><button class="link-button" id="knowledgeServerButton" type="button">查看服务端文稿 →</button></div></article>
+                <article class="source-gateway-card"><i>媒</i><div><strong>党政媒体参考库</strong><p>公文与评论场景可选。按范围采集媒体文章并提炼写法，与项目事实和学术文献分开管理。</p><button class="link-button" id="knowledgeCollectButton" type="button">选择与采集 →</button></div></article>
               </aside>
             </div>
           </div>
@@ -741,19 +769,8 @@
               <span><i>1</i><b>定任务</b><small>场景与受众</small></span><em>→</em><span><i>2</i><b>选材料</b><small>事实与写法</small></span><em>→</em><span><i>3</i><b>定表达</b><small>标题与段首</small></span><em>→</em><span><i>4</i><b>成母稿</b><small>结构化正文</small></span><em>→</em><span><i>5</i><b>审交付</b><small>核验与版本</small></span>
             </section>
 
-            <div class="recipe-grid" id="recipeCatalog">
-              <article class="recipe-card is-featured" data-recipe-id="official-action">
-                <div class="recipe-card-top"><span>公文 · 综合</span><b>推荐</b></div><h2>问题求解闭环</h2><p>背景意义—现状问题—重点举措—组织保障，适合方案、报告与汇报材料。</p><ol><li>标题先明确主题与文种</li><li>每段以判断句或行动句领起</li><li>数字、日期与政策表述全部溯源</li></ol><button class="secondary-button" type="button" data-apply-recipe="official-action">载入当前项目</button>
-              </article>
-              <article class="recipe-card" data-recipe-id="parallel-headings">
-                <div class="recipe-card-top"><span>表达 · 标题</span><b>排比</b></div><h2>一二三四行动式</h2><p>以四个结构平行、语义递进的小标题支撑全文，增强辨识度与节奏感。</p><ol><li>同一词性开头</li><li>同一语法骨架</li><li>从认识到落实递进</li></ol><button class="secondary-button" type="button" data-apply-recipe="parallel-headings">进入标题实验室</button>
-              </article>
-              <article class="recipe-card" data-recipe-id="briefing-first">
-                <div class="recipe-card-top"><span>简报 · 信息</span><b>高密度</b></div><h2>结论数据前置式</h2><p>开头一句给结论，随后用关键数据、问题和下一步安排快速完成信息传达。</p><ol><li>首句回答“发生了什么”</li><li>每段只承载一个判断</li><li>责任、时限紧随行动</li></ol><button class="secondary-button" type="button" data-apply-recipe="briefing-first">用于当前项目</button>
-              </article>
-              <article class="recipe-card" data-recipe-id="academic-evidence">
-                <div class="recipe-card-top"><span>学术 · 研究</span><b>证据链</b></div><h2>问题—证据—贡献式</h2><p>围绕研究问题组织文献矩阵，将每一项核心论断链接到真实文献和证据片段。</p><ol><li>识别研究缺口</li><li>建立论断—证据链接</li><li>核验引用覆盖率</li></ol><button class="secondary-button" type="button" data-open-view="academic">进入学术研究</button>
-              </article>
+            <div class="recipe-grid" id="recipeCatalog" aria-live="polite">
+              <p class="recipe-catalog-loading" role="status">正在载入各写作场景的配方；每个配方将同步结构方法、表达要求与审校标准。</p>
             </div>
           </div>
         </section>
@@ -761,7 +778,7 @@
         <section class="suite-page portal-page" id="reviewHubPage" data-suite-page="review" aria-labelledby="reviewHubHeading" hidden>
           <div class="portal-scroll compact-portal">
             <header class="portal-page-header">
-              <div><span class="page-kicker">交付前的最后一道关口</span><h1 id="reviewHubHeading">审校中心</h1><p>将格式规范、结构完整、事实一致、语言质量和引用覆盖放到同一张审校清单。</p></div>
+              <div><span class="page-kicker">交付前的最后一道关口</span><h1 id="reviewHubHeading">审校中心</h1><p id="reviewSceneDescription">将格式规范、结构完整、事实一致、语言质量和引用覆盖放到同一张审校清单。</p></div>
               <div class="page-header-actions"><button class="secondary-button" type="button" data-open-view="projects" data-project-focus="reviewPanel">查看文稿</button><button class="primary-button" id="hubRunReviewButton" type="button">运行综合审校</button></div>
             </header>
 
@@ -771,11 +788,11 @@
                 <div><span class="eyebrow">当前母稿</span><h2 id="reviewHubStatus">等待文稿</h2><p id="reviewHubSummary">生成或输入母稿后，可在这里启动完整审校。</p><button class="link-button" type="button" data-open-view="projects" data-project-focus="documentEditor">打开母稿 →</button></div>
               </section>
               <section class="review-dimensions" aria-label="审校维度">
-                <article><i>规</i><div><strong>格式规范</strong><small>文种、层级、称谓、日期</small></div><b id="hubFormatScore">待检</b></article>
-                <article><i>构</i><div><strong>结构完整</strong><small>逻辑、标题、段首与衔接</small></div><b id="hubStructureScore">待检</b></article>
-                <article><i>实</i><div><strong>事实一致</strong><small>数字、主体、时间与出处</small></div><b id="hubFactScore">待检</b></article>
-                <article><i>语</i><div><strong>语言精炼</strong><small>赘词、歧义与表达力度</small></div><b id="hubLanguageScore">待检</b></article>
-                <article><i>引</i><div><strong>引用覆盖</strong><small>论断—文献—证据链接</small></div><b id="hubCitationScore">学术任务</b></article>
+                <article><i>规</i><div><strong id="hubFormatLabel">格式规范</strong><small>文档类型、层级、称谓与日期</small></div><b id="hubFormatScore">待检</b></article>
+                <article><i>构</i><div><strong id="hubStructureLabel">结构完整</strong><small>逻辑、标题、段首与衔接</small></div><b id="hubStructureScore">待检</b></article>
+                <article><i>实</i><div><strong id="hubFactLabel">事实一致</strong><small>数字、主体、时间与出处</small></div><b id="hubFactScore">待检</b></article>
+                <article><i>语</i><div><strong id="hubLanguageLabel">语言精炼</strong><small>赘词、歧义与表达力度</small></div><b id="hubLanguageScore">待检</b></article>
+                <article><i>引</i><div><strong id="hubCitationLabel">引用覆盖</strong><small>论断—文献—证据链接</small></div><b id="hubCitationScore">学术任务</b></article>
               </section>
               <aside class="review-next-card">
                 <span class="eyebrow">审校原则</span><h2>机器给线索，人来做定稿</h2><ul><li>高风险数字逐项核对原始材料</li><li>模型评价与事实证据分开呈现</li><li>未匹配到依据的表述明确标记</li><li>完成修改后再生成交付版本</li></ul><button class="secondary-button full-width" type="button" data-open-view="delivery">审校后去交付</button>
@@ -788,7 +805,7 @@
         <section class="suite-page portal-page" id="deliveryPage" data-suite-page="delivery" aria-labelledby="deliveryHeading" hidden>
           <div class="portal-scroll compact-portal">
             <header class="portal-page-header">
-              <div><span class="page-kicker">从母稿到正式文件</span><h1 id="deliveryHeading">交付中心</h1><p>统一管理母稿、渠道变体、Word 域、批量套用与可继续编辑的正式文件。</p></div>
+              <div><span class="page-kicker">从母稿到正式文件</span><h1 id="deliveryHeading">交付中心</h1><p id="deliverySceneNote">统一管理母稿、渠道变体与可继续编辑的交付文件。Word 导出为通用工作稿，学术投稿仍需按目标期刊调整版式。</p></div>
               <div class="page-header-actions"><button class="secondary-button" type="button" data-open-view="projects" data-project-focus="variantStudio">生成渠道变体</button><button class="primary-button" id="deliveryWordButton" type="button">导出当前 Word</button></div>
             </header>
 
@@ -801,7 +818,7 @@
               <article class="delivery-card"><span class="delivery-icon">W</span><h2>规范 Word</h2><p>保留标题层级与可编辑正文，<code>{{变量}}</code> 转为真实 Word 域。</p><button class="secondary-button full-width" id="deliveryWordSecondaryButton" type="button">导出 Word</button></article>
               <article class="delivery-card"><span class="delivery-icon">批</span><h2>批量套用</h2><p>上传 CSV，为单位、姓名、日期等变量批量生成独立文稿。</p><button class="secondary-button full-width" id="deliveryBatchButton" type="button">打开批量交付</button></article>
               <article class="delivery-card"><span class="delivery-icon">PDF</span><h2>打印与 PDF</h2><p>使用正式纸张版式打印，或通过系统打印面板存为 PDF。</p><button class="secondary-button full-width" id="deliveryPrintButton" type="button">打印 / 存为 PDF</button></article>
-              <article class="delivery-card is-accent"><span class="delivery-icon">变</span><h2>渠道内容包</h2><p>从同一母稿生成简报、讲话、通稿、新媒体和问答等变体。</p><button class="primary-button full-width" id="deliveryVariantsButton" type="button">进入一稿多用</button></article>
+              <article class="delivery-card is-accent"><span class="delivery-icon">变</span><h2>渠道内容包</h2><p>从同一母稿生成文档、邮件、汇报、网站发布和社交媒体等渠道版本。</p><button class="primary-button full-width" id="deliveryVariantsButton" type="button">进入一稿多用</button></article>
             </div>
           </div>
         </section>
@@ -809,13 +826,13 @@
         <section class="suite-page academic-page" id="academicPage" data-suite-page="academic" aria-labelledby="academicHeading" hidden>
           <div class="academic-scroll">
             <header class="portal-page-header academic-page-header">
-              <div><span class="page-kicker">研究写作闭环</span><h1 id="academicHeading">学术研究</h1><p>从真实参考文献出发，组织文献矩阵、论断证据、规范引文与逐条审稿回复。</p></div>
+              <div><span class="page-kicker">研究写作闭环 · 本地规则工具</span><h1 id="academicHeading">学术研究</h1><p>从真实参考文献出发，组织文献矩阵、论断证据、规范引文与逐条审稿回复。本页结构生成与检查不调用大模型，不代表全文理解或人工学术审查。</p></div>
               <div class="academic-progress" aria-label="研究流程"><span class="is-active">简报</span><i></i><span>文献</span><i></i><span>证据</span><i></i><span>成文</span><i></i><span>核验</span></div>
             </header>
 
             <div class="academic-brief-strip">
               <label class="field compact-field"><span>研究任务</span><select id="academicTaskType"><option value="literature-review">文献综述</option><option value="research-outline">研究提纲</option><option value="abstract">论文摘要</option><option value="rebuttal">审稿回复</option></select></label>
-              <label class="field"><span>题目 / 研究问题</span><input id="academicTitle" maxlength="240" placeholder="例如：数字政府建设如何提升基层治理效能" /></label>
+              <label class="field"><span>题目 / 研究问题</span><input id="academicTitle" maxlength="240" placeholder="例如：混合办公对团队协作效率有何影响" /></label>
               <label class="field"><span>研究目标</span><input id="academicGoal" maxlength="300" placeholder="说明要回答的问题、分析范围与预期贡献" /></label>
               <label class="field compact-field"><span>引文样式</span><select id="academicCitationStyle"><option value="gb-t-7714">GB/T 7714</option><option value="apa">APA</option><option value="mla">MLA</option><option value="chicago">Chicago</option></select></label>
             </div>
@@ -850,12 +867,12 @@
                   <div class="academic-module-heading"><div><span class="module-number">03</span><h2>论断证据</h2></div><span class="coverage-pill" id="academicCoverage">覆盖率 —</span></div>
                   <div class="evidence-extract-grid">
                     <label class="field compact-field"><span>来源文献</span><select id="academicEvidenceRecord"><option value="">先导入文献</option></select></label>
-                    <label class="field"><span>检索焦点</span><input id="academicEvidenceQuery" maxlength="200" placeholder="例如：基层治理效能的作用机制" /></label>
+                    <label class="field"><span>检索焦点</span><input id="academicEvidenceQuery" maxlength="200" placeholder="例如：团队协作效率的测量方法" /></label>
                   </div>
                   <label class="field"><span>可核验原文</span><textarea id="academicEvidenceText" rows="5" placeholder="粘贴论文摘要、笔记或已获准使用的全文片段，再提取带位置与来源的证据。"></textarea></label>
                   <button class="secondary-button" id="academicExtractEvidenceButton" type="button">提取证据片段</button>
                   <div class="evidence-snippets is-empty" id="academicEvidenceSnippets"><p>证据片段将保留真实文献 ID 与文本位置</p></div>
-                  <label class="field claim-field"><span>待核验论断（每行一条）</span><textarea id="academicClaims" rows="5" placeholder="数字政府平台整合能够降低基层重复填报。&#10;数据标准统一是跨部门协同的关键前提。"></textarea></label>
+                  <label class="field claim-field"><span>待核验论断（每行一条）</span><textarea id="academicClaims" rows="5" placeholder="示例：现有研究对协作效率采用了不同的测量指标。&#10;请填写你的实际论断，再用已导入文献逐条核对。"></textarea></label>
                   <button class="primary-button" id="academicVerifyClaimsButton" type="button">核验论断—证据链接</button>
                   <div class="claim-links is-empty" id="academicClaimLinks"><p>核验结果会区分已有证据、部分支撑和待补证据</p></div>
                 </section>
@@ -893,8 +910,8 @@
               <button class="primary-button" id="openSettingsDrawerButton" type="button">打开模型与 API 设置</button>
             </header>
             <div class="settings-page-grid">
-              <section class="settings-overview-card"><div class="settings-card-icon">AI</div><div><span class="eyebrow">模型连接</span><h2 id="settingsEngineTitle">本地演示引擎</h2><p id="settingsEngineSummary">不填写密钥也可体验完整界面；需要真实模型时再主动配置。</p><button class="link-button" id="settingsEngineButton" type="button">配置模型连接 →</button></div></section>
-              <section class="settings-overview-card"><div class="settings-card-icon">V2</div><div><span class="eyebrow">第二阶段接口</span><h2 id="settingsV2Title">渐进增强</h2><p id="settingsV2Summary">现有公文流程保持可用；检测到 /api/v2/* 后自动接入项目、资产、知识与学术能力。</p><button class="link-button" id="probeV2Button" type="button">重新检测服务能力 →</button></div></section>
+              <section class="settings-overview-card"><div class="settings-card-icon">AI</div><div><span class="eyebrow">当前生成方式</span><h2 id="settingsEngineTitle">模板演示 · 未调用大模型</h2><p id="settingsEngineSummary">使用内置模板、写作公式和规则评分，不消耗模型 Token。</p><button class="link-button" id="settingsEngineButton" type="button">配置模型连接 →</button></div></section>
+              <section class="settings-overview-card"><div class="settings-card-icon">V2</div><div><span class="eyebrow">第二阶段接口</span><h2 id="settingsV2Title">渐进增强</h2><p id="settingsV2Summary">项目、资产、材料与研究工具由当前服务提供；统一工作台按所选场景组织写作能力。</p><button class="link-button" id="probeV2Button" type="button">重新检测服务能力 →</button></div></section>
               <section class="settings-overview-card privacy-wide"><div class="settings-card-icon">锁</div><div><span class="eyebrow">安全与隐私</span><h2>默认不向第三方加载任何资源</h2><p>静态页面无外部字体、统计脚本或图片；访问令牌只在当前会话保存，模型密钥只保存在当前页面内存。文稿、材料与文献仅在你点击相应动作后提交到所配置的服务。</p><ul><li>发布包排除环境文件、数据库、文稿、日志与构建缓存</li><li>服务端模型密钥不回传浏览器</li><li>导出文件由当前浏览器直接下载</li></ul></div></section>
               <section class="settings-overview-card"><div class="settings-card-icon">本</div><div><span class="eyebrow">本机草稿</span><h2>显式本地预览模式</h2><p>开启后，第二阶段服务暂不可用时可在本浏览器预览结果；界面会明确标注“本地预览”，不会把服务错误显示成服务端成功。</p><label class="local-draft-toggle"><input id="localDraftMode" type="checkbox" checked /><span>允许本地预览草稿</span></label><div class="local-data-actions"><button class="link-button" id="clearPhase2DraftsButton" type="button">清理第二阶段草稿 →</button><button class="link-button danger-link" id="clearAllLocalDataButton" type="button">清除本机全部数据 →</button></div></div></section>
             </div>
@@ -906,7 +923,7 @@
         <span><i class="connection-dot" id="connectionDot"></i><b id="connectionLabel">本地模式</b></span>
         <span>自动保存已开启</span>
         <span class="statusbar-spacer"></span>
-        <span id="providerLabel">演示引擎</span>
+        <span id="providerLabel">未调用大模型</span>
         <button class="text-button" id="footerSettingsButton" type="button">切换模型</button>
       </footer>
     </div>
@@ -918,7 +935,7 @@
           <button class="icon-button" data-close-project type="button" aria-label="关闭新建项目"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </div>
         <div class="modal-body project-modal-fields">
-          <label class="field"><span>项目名称</span><input id="newProjectName" maxlength="200" required placeholder="例如：区委办 2026 年重点材料" /></label>
+          <label class="field"><span>项目名称</span><input id="newProjectName" maxlength="200" required placeholder="例如：产品年度复盘 / 团队知识库 / 研究课题" /></label>
           <label class="field"><span>项目说明（选填）</span><textarea id="newProjectDescription" rows="3" maxlength="2000" placeholder="说明任务范围、使用场景或交付节点"></textarea></label>
           <label class="field compact-field"><span>默认场景包</span><select id="newProjectScenarioPack"><option value="gongwen">公文与综合材料</option><option value="workplace">职场沟通</option><option value="media">媒体内容</option><option value="academic">学术研究</option></select></label>
           <p class="connection-test" id="projectCreateStatus">提交后将写入当前部署的项目服务。</p>
@@ -928,7 +945,7 @@
     </dialog>
 
     <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
-    <aside class="settings-drawer" id="settingsDrawer" aria-labelledby="settingsTitle" aria-hidden="true">
+    <aside class="settings-drawer" id="settingsDrawer" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-hidden="true" inert>
       <div class="drawer-header">
         <div><span class="eyebrow">连接设置</span><h2 id="settingsTitle">模型与 API</h2></div>
         <button class="icon-button" data-close-drawer type="button" aria-label="关闭设置">
@@ -940,7 +957,7 @@
           <label class="mode-card is-selected">
             <input type="radio" name="engineMode" value="demo" checked />
             <span class="mode-icon">演</span>
-            <span><strong>本地演示</strong><small>无需密钥，体验完整流程</small></span>
+            <span><strong>模板演示（无大模型）</strong><small>内置模板与规则 · 不消耗 Token</small></span>
             <b>✓</b>
           </label>
           <label class="mode-card">
@@ -950,6 +967,12 @@
             <b>✓</b>
           </label>
         </div>
+
+        <section class="engine-explanation" aria-label="生成方式说明">
+          <strong id="engineExplanationTitle">演示模式用的是哪个模型？</strong>
+          <p id="engineExplanationDetail">演示模式没有接入任何大语言模型。标题来自公式与规则评分，正文按配方和材料组装，适合检查流程；语言质量与真实模型生成不同。</p>
+          <p>项目表达焦点、学术提纲和引用检查采用本地规则。选择模型 API 后，单篇标题、起草、润色和语言审校调用所选模型；项目母稿与变体使用服务端模型。母稿、标题候选和变体会标明生成来源。</p>
+        </section>
 
         <div id="apiSettings" class="api-settings is-disabled">
           <label class="field"><span>服务商</span><select id="providerName"><option value="openai">OpenAI 兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="custom">自定义</option></select></label>
@@ -966,8 +989,8 @@
         <div class="deployment-setting" id="serverProviderCard" hidden>
           <span class="deployment-setting-icon" aria-hidden="true">AI</span>
           <div>
-            <strong>服务端模型已就绪</strong>
-            <p>部署环境已经保存模型连接信息，选择“连接模型 API”即可使用；页面无需填写密钥。</p>
+            <strong id="serverProviderTitle">服务端模型配置</strong>
+            <p id="serverProviderDetail">正在检查服务端配置。</p>
           </div>
         </div>
 
@@ -1008,7 +1031,7 @@
       </form>
     </dialog>
 
-    <aside class="history-drawer" id="historyDrawer" aria-labelledby="historyTitle" aria-hidden="true">
+    <aside class="history-drawer" id="historyDrawer" role="dialog" aria-modal="true" aria-labelledby="historyTitle" aria-hidden="true" inert>
       <div class="drawer-header">
         <div><span class="eyebrow">本地快照</span><h2 id="historyTitle">版本记录</h2></div>
         <button class="icon-button" data-close-history type="button" aria-label="关闭版本记录">
@@ -1025,7 +1048,7 @@
     <dialog class="modal library-modal" id="articleLibraryModal">
       <form method="dialog" class="modal-card library-card">
         <div class="modal-header">
-          <div><span class="eyebrow">写法参考</span><h2>文章来源库</h2><p>文章内容与事实材料分开管理，只提炼标题结构、论证层次和句式特征。</p></div>
+          <div><span class="eyebrow">写法参考</span><h2>党政媒体参考库</h2><p>本库面向公文与评论写法，只提炼标题结构、论证层次和句式特征；项目事实与学术文献在各自资料入口管理。</p></div>
           <button class="icon-button" value="cancel" aria-label="关闭文章来源库"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </div>
         <div class="modal-body library-grid">
@@ -1135,7 +1158,7 @@
             <section>
               <div class="section-header-row"><h3>数据预览</h3><span class="data-count" id="batchRowCount">0 行</span></div>
               <div class="table-wrap"><table id="batchPreview"><thead></thead><tbody></tbody></table><div class="table-empty" id="batchEmpty">粘贴或上传 CSV 后在此预览</div></div>
-              <label class="field"><span>文件包名称</span><input id="batchFilename" value="公文批量文件" /></label>
+              <label class="field"><span>文件包名称</span><input id="batchFilename" value="文稿批量文件" /></label>
             </section>
           </div>
         </div>

@@ -208,7 +208,7 @@ def test_task_context_is_atomic_and_marks_retained_drafts_stale() -> None:
         'reconcileTaskContext("restore", { invalidate: false',
         "ensureDocumentTypeOption(context.documentType)",
         "phase2State.document_stale = hasRetainedDraft",
-        'phase2State.document_stale ? "上一版草稿 · 待重生成" : "草稿"',
+        'phase2State.document_stale\n      ? "上一版草稿 · 待重生成"',
         "phase2State.output_binding_hash = currentBriefBindingHash()",
         "methodologyCatalogReady",
         (

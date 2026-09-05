@@ -82,6 +82,17 @@ bearer_token_env_var = "YANZHANG_MCP_ACCESS_TOKEN"
 Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token，不放砚章服务器的模型
 供应商密钥。
 
+### 哪些操作调用模型
+
+“模板演示”没有使用任何大模型，不消耗模型 Token；它仍可通过本地服务保存项目、资料和版本。
+MCP 客户端自身使用的对话模型，与砚章工具内部执行的引擎是两回事。创建工作流、派生渠道变体
+或运行模型增强审校时，`live` 默认 `false`，只有显式 `true` 才调用砚章服务端配置的模型。
+未配置时返回 `model_configuration_error`，不静默给出模板稿。
+
+网页单篇起草、标题实验室、润色和单篇审校另支持本页临时 API 连接或服务端默认模型；该临时
+连接不传给 MCP、项目工作流或渠道变体。项目表达焦点与学术标题、提纲、摘要、引用核验等仍为
+规则功能。在线来源导入及文献查询仍按主动请求联网，演示模式不等于完全断网。
+
 ## 3. v0.2 工具目录
 
 同一服务注册 45 个 `yanzhang_*` 工具；连同 26 个兼容 `gongwen_*` 工具共 71 个。
@@ -114,7 +125,7 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 | 工具 | 核心输入 | 作用 |
 | --- | --- | --- |
 | `yanzhang_generate_titles` | 项目、主题、目标、受众、场景包、配方、文种 | 生成标题、开头、小标题或段首观点句候选 |
-| `yanzhang_create_workflow` | 完整任务简报；可选 `brief_id`、自动审校和导出格式 | 创建可恢复工作流并返回绑定的 `brief_id` |
+| `yanzhang_create_workflow` | 完整任务简报；可选 `brief_id`、`live=false`、自动审校和导出格式 | 创建可恢复工作流并返回绑定的 `brief_id` |
 | `yanzhang_run_workflow` | `project_id`、`workflow_id`；可选同步/后台和恢复步骤 | 在项目作用域内运行或恢复工作流 |
 | `yanzhang_get_workflow` | `project_id`、`workflow_id` | 查询项目内步骤、脱敏错误摘要与输出资产 |
 | `yanzhang_cancel_workflow` | `project_id`、`workflow_id` | 请求取消项目内尚未完成的工作流 |
@@ -168,7 +179,8 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
    有自定义结构时同时写入 `structure_override`；
 6. 简报已由 Web/HTTP 保存时，把返回的 `brief_id` 传给 `yanzhang_create_workflow`；否则省略
    `brief_id` 由工作流创建并保存简报。即使传入 `brief_id`，仍须提交完整必填简报字段，
-   且规范化后的内容必须与已存简报一致。再调用 `yanzhang_run_workflow`，并校验创建响应中的
+   且规范化后的内容必须与已存简报一致。模板体验保持 `live=false`；请求真实写作时显式传
+   `live=true`。再调用 `yanzhang_run_workflow`，并校验创建响应中的
    `brief_id` 以绑定项目母稿；后台模式用
    `yanzhang_get_workflow` 查询，必要时从明确步骤恢复；
 7. `yanzhang_get_asset` 分块读取母稿，`yanzhang_create_variant` 派生邮件、演示、网页或社交版本；
@@ -176,8 +188,11 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 9. `yanzhang_export_asset` 交付选定版本。
 
 工作流的运行、查询、取消和恢复始终同时传入创建时的 `project_id`。审校只希望本地规则时保持
-`live=false`；显式使用服务端模型时传 `live=true`，并检查响应的 `effective_mode` 与
-`resolved_route`。导出后优先按返回的项目作用域 Resource URI 读取文件。
+`live=false`；显式使用服务端模型时传 `live=true`，并检查响应的 `execution`、`effective_mode` 与
+`resolved_route`。`execution` 的供应商、型号和 `uses_model` 才表达本次实际引擎；路由画像用于
+解释能力选择。工作流创建后保存执行模式，运行时不再次根据客户端设置判断。资产读取和版本列表
+返回对应版本的可选执行来源；手工修订与未知历史记录为 `null`，不借用当前模型信息。
+导出后优先按返回的项目作用域 Resource URI 读取文件。
 运行、查询、取消或恢复响应的 `workflow.brief_id` 与创建时一致；只有创建响应另外提供顶层
 `brief_id`。
 `kind=style_reference` 的项目资料（包括选中的文章）只供结构、标题节奏、语气和句式参考，
@@ -217,6 +232,11 @@ Web Token 与 MCP Token 是两个独立凭据。连接器配置只放 MCP Token�
 `yanzhang://` Resources：一类按项目读取导出工件，十类按项目列出/读取文献、证据、矩阵、研究
 主张与引用关系。旧命令 `gongwen-mcp` 和 `GONGWEN_*` 配置也继续读取。
 
+`gongwen_rewrite_text` 现支持可选 `document_type`（默认空，最多 100 字符），按明确文种保留
+公文、职场、传播或学术语域；省略时自由文本采用中性职场场景。`gongwen_review_document` 已有的
+同名字段也用于场景审校。方法目录从 19 个核心配方派生结构，另有 26 张场景写法方法卡；完整
+参数及数量边界见 [完整 MCP 契约](gongwen-mcp.md#按场景改写与审校)。
+
 v0.2 导出 URI 为 `yanzhang://projects/{project_id}/exports/{artifact_id}`，读取时校验项目归属；
 旧 `gongwen://exports/{id}` 只读取兼容工具生成的未分项目工件。导出元数据同时包含项目、资产、
 修订和创建操作。学术 Resource 的完整 URI 表见
@@ -230,7 +250,8 @@ v0.2 导出 URI 为 `yanzhang://projects/{project_id}/exports/{artifact_id}`，�
 - stdio 参数在本机进程间传递；远程模式的工具参数通过部署域名发送，公网入口使用 HTTPS。
 - 公开来源或真实模型工具具有网络副作用；先缩小资料和查询范围，再调用相应步骤。
 - 已保存的 `brief_id` 同时绑定项目与规范化内容；相同输入可安全重放，内容变化时使用新 ID。
-- MCP 返回稳定错误类别，如 `invalid_request`、`brief_conflict`、`project_scope_error`、`not_found`、
+- MCP 返回稳定错误类别，如 `invalid_request`、`model_configuration_error`、`brief_conflict`、
+  `project_scope_error`、`not_found`、
   `operation_timeout` 和 `internal_error`；修正字段或状态后重试，不把完整请求正文复制到日志。
 - 后台工作流超时后先查询状态；导出与发布前核对目标资产 ID 和版本，避免重复动作。
 - `metadata_verified`、DOI 规范化、引用评分和参考文献排版的边界见

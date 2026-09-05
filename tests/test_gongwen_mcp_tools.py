@@ -276,6 +276,9 @@ async def test_writing_storage_audit_and_usage_tools_cover_local_flow(tmp_path: 
             "server_provider_configured": False,
             "provider_name": None,
             "default_model": None,
+            "default_mode": "demo",
+            "demo_engine": "deterministic",
+            "demo_uses_model": False,
         }
         assert "api_key" not in str(status)
 

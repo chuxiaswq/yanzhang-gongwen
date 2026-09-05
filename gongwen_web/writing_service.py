@@ -78,6 +78,7 @@ from yanzhang_core.provenance import (
 )
 from yanzhang_core.reviews import ReviewReport, review_asset
 from yanzhang_core.routing import (
+    ModelExecutionConfigurationError,
     ModelRouteRequest,
     RoutingDecision,
     RoutingPresetName,
@@ -252,7 +253,7 @@ class YanzhangPlatformService:
         _payload(request)
         await asyncio.to_thread(self.storage.check_ready)
         await asyncio.to_thread(self.academic_repository.check_ready)
-        decision = self._route(None, request_live=self.composer.live_available)
+        decision = self._route(None, request_live=False)
         return {
             "ok": True,
             "service": "yanzhang-platform",
@@ -262,6 +263,19 @@ class YanzhangPlatformService:
             "live_model_available": self.composer.live_available,
             "routing_preset": self.routing_preset,
             "resolved_route": _model(decision),
+            "execution": self._execution(False),
+            "model": (
+                self.runtime.public_model_configuration()
+                if self.runtime is not None
+                else {
+                    "server_provider_configured": False,
+                    "provider_name": None,
+                    "default_model": None,
+                    "default_mode": "demo",
+                    "demo_engine": "deterministic",
+                    "demo_uses_model": False,
+                }
+            ),
             "scenario_pack_count": len(list_scenario_packs()),
             "recipe_count": len(list_recipes()),
             "import_formats": list(supported_import_formats()),
@@ -549,6 +563,7 @@ class YanzhangPlatformService:
             "candidate_batch": _model(batch),
             "requested_count": requested_count,
             "generation_mode": "local",
+            "execution": self._execution(False),
             "context_usage": {
                 "factual_material_ids": [item.id for item in fact_materials[:16]],
                 "excluded_style_reference_count": len(materials) - len(fact_materials),
@@ -570,7 +585,9 @@ class YanzhangPlatformService:
             if saved_brief != brief:
                 raise ValueError("已保存简报与当前工作流输入不一致，请先保存新的任务简报")
             brief = saved_brief
-        decision = self._route(brief.model_profile_id, request_live=self.composer.live_available)
+        requested_live = _boolean(values, "live", default=False)
+        decision = self._route(brief.model_profile_id, request_live=requested_live)
+        live = self._live_mode(requested_live, decision)
         run = await asyncio.to_thread(
             self.workflow_engine.create_run,
             _WORKFLOW_DEFINITION,
@@ -579,7 +596,8 @@ class YanzhangPlatformService:
                 "project_id": project_id,
                 "auto_review": _boolean(values, "auto_review", default=True),
                 "requested_exports": list(_str_sequence(values, "requested_exports")),
-                "live": self.composer.live_available and decision.allows_network,
+                "live": live,
+                "execution": self._execution(live),
                 "resolved_route": _model(decision),
             },
             project_id=project_id,
@@ -588,6 +606,7 @@ class YanzhangPlatformService:
             "workflow": await self._workflow_payload(run),
             "brief_id": brief.id,
             "resolved_route": _model(decision),
+            "execution": self._execution(live),
         }
 
     async def yanzhang_run_workflow(self, request: RequestInput) -> PlatformResult:
@@ -732,7 +751,14 @@ class YanzhangPlatformService:
                 "next_offset": min(start + size, len(text)),
             }
         )
-        return {"asset": payload}
+        selected_revision = await asyncio.to_thread(
+            self.storage.get_revision, asset.id, asset.current_revision
+        )
+        execution = selected_revision.execution
+        return {
+            "asset": payload,
+            "execution": _model(execution) if execution is not None else None,
+        }
 
     async def create_asset(self, request: RequestInput) -> PlatformResult:
         values = _payload(request)
@@ -758,12 +784,17 @@ class YanzhangPlatformService:
             project_id=project_id,
             note=f"{draft.mode} 生成母稿",
             model_profile_id=decision.profile.id,
-            metadata={"mode": draft.mode, "route": _model(decision)},
+            metadata={
+                "mode": draft.mode,
+                "route": _model(decision),
+                "execution": self._execution(live),
+            },
         )
         return {
             "asset": _model(asset),
             "generation_mode": draft.mode,
             "resolved_route": _model(decision),
+            "execution": self._execution(live),
         }
 
     async def yanzhang_create_variant(self, request: RequestInput) -> PlatformResult:
@@ -808,13 +839,18 @@ class YanzhangPlatformService:
             parent_asset_id=source.id,
             note=f"{draft.mode} 渠道变体",
             model_profile_id=decision.profile.id,
-            metadata={"source_revision": source.current_revision, "route": _model(decision)},
+            metadata={
+                "source_revision": source.current_revision,
+                "route": _model(decision),
+                "execution": self._execution(live),
+            },
         )
         return {
             "asset": _model(asset),
             "source_asset_id": source.id,
             "generation_mode": draft.mode,
             "resolved_route": _model(decision),
+            "execution": self._execution(live),
         }
 
     async def yanzhang_list_revisions(self, request: RequestInput) -> PlatformResult:
@@ -897,6 +933,7 @@ class YanzhangPlatformService:
             "checks": list(checks),
             "review_dimensions": list(selected_dimensions),
             "effective_mode": "live" if live else "local",
+            "execution": self._execution(live),
             "requested_model_profile_id": profile_id,
             "resolved_route": _model(decision),
             "model_issue_count": len(model_issues),
@@ -1318,6 +1355,7 @@ class YanzhangPlatformService:
             "items": [_model(item) for item in suggestions],
             "count": len(suggestions),
             "requested_count": count,
+            "execution": self._execution(False),
         }
 
     async def yanzhang_create_academic_outline(self, request: RequestInput) -> PlatformResult:
@@ -1344,7 +1382,7 @@ class YanzhangPlatformService:
             records,
             evidence,
         )
-        return {"outline": _model(outline)}
+        return {"outline": _model(outline), "execution": self._execution(False)}
 
     async def yanzhang_draft_abstract(self, request: RequestInput) -> PlatformResult:
         values = _payload(request)
@@ -1368,7 +1406,7 @@ class YanzhangPlatformService:
             records,
             journal=journal,
         )
-        return {"abstract": _model(abstract)}
+        return {"abstract": _model(abstract), "execution": self._execution(False)}
 
     async def yanzhang_review_academic_integrity(self, request: RequestInput) -> PlatformResult:
         values = _payload(request)
@@ -1404,6 +1442,7 @@ class YanzhangPlatformService:
         )
         return {
             "integrity_review": _model(review),
+            "execution": self._execution(False),
             "manuscript_characters": len(manuscript),
             "manuscript_words": manuscript_word_count(manuscript),
             "journal_profile_id": journal.id if journal is not None else None,
@@ -1418,7 +1457,11 @@ class YanzhangPlatformService:
             raise ValueError("changes 应为对象")
         changes = {str(key): _plain_str(value, "changes") for key, value in raw_changes.items()}
         items = await asyncio.to_thread(self.academic.prepare_rebuttal, comments, changes)
-        return {"items": [_model(item) for item in items], "count": len(items)}
+        return {
+            "items": [_model(item) for item in items],
+            "count": len(items),
+            "execution": self._execution(False),
+        }
 
     async def _project(self, project_id: str) -> WritingProject:
         return await asyncio.to_thread(self.storage.get_project, project_id)
@@ -1657,6 +1700,32 @@ class YanzhangPlatformService:
             payload["id"] = brief_id
         return WritingBrief.model_validate(payload)
 
+    def _execution(self, live: bool) -> dict[str, object]:
+        """Report the execution engine, never a synthetic routing-profile model."""
+
+        if not live:
+            return {
+                "mode": "local",
+                "engine": "deterministic",
+                "provider": None,
+                "model": None,
+                "label": "本地规则引擎（未调用大模型）",
+                "uses_model": False,
+            }
+        provider = self.runtime.server_provider if self.runtime is not None else None
+        return {
+            "mode": "live",
+            "engine": "language_model",
+            "provider": provider.name if provider is not None else None,
+            "model": provider.model if provider is not None else None,
+            "label": (
+                f"{provider.name} · {provider.model}"
+                if provider is not None
+                else "已注入模型回调（型号未声明）"
+            ),
+            "uses_model": True,
+        }
+
     def _route(
         self,
         profile_id: str | None,
@@ -1680,9 +1749,9 @@ class YanzhangPlatformService:
         if not requested:
             return False
         if not self.composer.live_available:
-            raise ValueError("实时写作模式尚未配置模型回调")
+            raise ModelExecutionConfigurationError("实时写作模式尚未配置模型回调")
         if not decision.allows_network:
-            raise ValueError("当前模型路由预设选择了本地确定性路径")
+            raise ModelExecutionConfigurationError("当前模型路由预设选择了本地确定性路径")
         return True
 
     async def _workflow_payload(self, run: WorkflowRunRecord) -> dict[str, object]:
@@ -1695,6 +1764,8 @@ class YanzhangPlatformService:
             project_id=project_id,
         )
         payload: dict[str, object] = {**dict(run), "steps": [dict(step) for step in steps]}
+        execution = run["input"].get("execution")
+        payload["execution"] = dict(execution) if isinstance(execution, Mapping) else None
         raw_brief = run["input"].get("brief")
         if isinstance(raw_brief, Mapping):
             brief_id = raw_brief.get("id")
@@ -1726,7 +1797,11 @@ class YanzhangPlatformService:
         )
         selected_title = brief.selected_title or batch.recommended
         return StepResult(
-            output={"candidate_batch": _model(batch), "selected_title": selected_title},
+            output={
+                "candidate_batch": _model(batch),
+                "selected_title": selected_title,
+                "execution": self._execution(False),
+            },
             state_updates={"selected_title": selected_title},
         )
 
@@ -1737,7 +1812,10 @@ class YanzhangPlatformService:
             {"id": section.id, "title": section.title, "purpose": section.purpose}
             for section in recipe.sections
         ]
-        return StepResult(output={"outline": outline}, state_updates={"outline": outline})
+        return StepResult(
+            output={"outline": outline, "execution": self._execution(False)},
+            state_updates={"outline": outline},
+        )
 
     async def _workflow_compose(self, context: StepContext) -> StepResult:
         brief = WritingBrief.model_validate(context.input["brief"])
@@ -1762,10 +1840,18 @@ class YanzhangPlatformService:
             project_id=project_id,
             note=f"工作流 {draft.mode} 生成母稿",
             model_profile_id=profile_id,
-            metadata={"workflow_run_id": context.run_id, "mode": draft.mode},
+            metadata={
+                "workflow_run_id": context.run_id,
+                "mode": draft.mode,
+                "execution": self._execution(live),
+            },
         )
         return StepResult(
-            output={"asset": _model(asset), "generation_mode": draft.mode},
+            output={
+                "asset": _model(asset),
+                "generation_mode": draft.mode,
+                "execution": self._execution(live),
+            },
             state_updates={"output_asset_id": asset.id, "generation_mode": draft.mode},
         )
 
@@ -1789,7 +1875,7 @@ class YanzhangPlatformService:
             terms=terms,
         )
         return StepResult(
-            output={"review": _model(report)},
+            output={"review": _model(report), "execution": self._execution(False)},
             state_updates={"review_score": report.overall_score, "review_passed": report.passed},
         )
 

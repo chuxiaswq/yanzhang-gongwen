@@ -47,7 +47,35 @@
 `details` 仅在存在结构化字段信息时出现，最多返回 20 项，且不回显密钥、完整请求或上游正文。
 常见状态为 `400 invalid_json`、`409 identity_mismatch`、`409 brief_conflict`、
 `409 project_scope_error`、`413 request_too_large`、`415 unsupported_media_type`、
-`422 validation_error`、`404 not_found`、`504 operation_timeout` 和 `500 internal_error`。
+`422 validation_error`、`422 model_configuration_error`、`404 not_found`、`504 operation_timeout`
+和 `500 internal_error`。
+
+### 执行模式与来源披露
+
+“模板演示”使用内置模板、公式与确定性规则，没有调用任何大模型，不消耗模型 Token；请求仍可
+访问本地服务并保存项目数据。显式来源导入或文献查询仍会联网。工作流创建、直接母稿、渠道变体
+和模型增强审校的 `live` 默认为 `false`；即使服务端配置了模型，省略该字段也保持规则模式。
+`live=true` 只使用服务端模型，未配置时返回 `422 model_configuration_error`，不静默生成模板稿。
+
+生成与审校响应的 `execution` 说明本次执行引擎，模型画像 `resolved_route` 另用于路由解释：
+
+```json
+{
+  "execution": {
+    "mode": "local",
+    "engine": "deterministic",
+    "provider": null,
+    "model": null,
+    "label": "本地规则引擎（未调用大模型）",
+    "uses_model": false
+  }
+}
+```
+
+真实模型执行为 `mode=live`、`engine=language_model`、`uses_model=true`，`provider` / `model`
+记录实际服务端配置的名称；仅注入回调且未声明型号时明确标注“型号未声明”。这些字段不含密钥或
+接口地址，也不表示 Token 使用量统计。项目表达焦点和学术标题、提纲、摘要、引用核验及完整性
+检查等仍为规则功能；全局 API 开关不改变这些接口的引擎。
 
 ## 2. 正式路由目录
 
@@ -133,6 +161,15 @@ GET /api/v2/workflow-definitions?scenario_pack_id=gongwen&limit=20&offset=0
 场景包、文种、渠道、步骤和输出格式，可直接用于前端配方选择器。
 `gongwen` 包含 `work-summary`、`briefing-material`、`leadership-speech`（领导讲话）、
 `research-report`（调研报告）、`implementation-plan` 和 `meeting-minutes`。
+
+场景还决定写法、语气、资料角色和生成/审校指引，不仅用于目录筛选。场景表现定义来自
+`yanzhang_core/scenario_profiles.py`，配方来自 `yanzhang_core/packs.py`；浏览器目录由生成脚本
+派生，避免页面与接口各维护一套配方。静态目录是公开方法配置，不是文章搜索或文献结果；
+它不改变本节 HTTP 路由，也不附带用户资料。
+当前目录含 4 个场景、19 个配方及 26 张场景写法方法卡；方法卡与配方章节不同。兼容方法论
+接口从全部核心配方派生 `recipe-<recipe_id>` 结构，非党政配方默认使用各自的 5 类标题公式，
+不继承党报写法。职场、传播资料经人工导入，学术沿用导入与公开元数据查询；本轮未新增商业
+媒体自动采集接口。
 
 ## 4. 项目、任务简报与资料
 
@@ -332,6 +369,7 @@ ID 或与 `headline_kind` 不匹配的 ID 返回字段校验错误。候选同�
 ```json
 {
   "brief_id": "STABLE_BRIEF_ID",
+  "live": false,
   "auto_review": true,
   "requested_exports": ["docx", "markdown"]
 }
@@ -345,7 +383,10 @@ ID 或与 `headline_kind` 不匹配的 ID 返回字段校验错误。候选同�
 顶层 `brief_id`；`workflow.brief_id` 也表达同一绑定关系。客户端应保存该 ID，将后续母稿、版本与
 审校结果绑定到同一任务简报。
 运行、查询、取消或恢复响应中的 `workflow.brief_id` 始终与创建时一致；只有创建响应另外
-提供顶层 `brief_id`。
+提供顶层 `brief_id`。`CreateWorkflowRequest.live` 默认为 `false`；显式 `true` 在创建时校验
+服务端模型配置，并将模式保存到工作流输入，后续运行不从页面开关重新推断。创建响应顶层
+`execution` 与 `workflow.execution` 记录所选执行路径；标题、提纲和自动审校步骤仍使用规则引擎，
+`draft` 步骤才按保存的 `live` 调用模型。上述四类步骤输出另标明自身的 `execution`。
 
 ### 运行、恢复和取消
 
@@ -386,10 +427,11 @@ POST /api/v2/projects/PROJECT_ID/workflows/WORKFLOW_ID/cancel
 }
 ```
 
-`brief_id` 必须属于当前项目。`live=false` 使用确定性本地组合器；`live=true` 由服务端模型画像与
-路由决定。母稿标题优先级为：创建请求显式 `title` > `brief.selected_title` > `brief.title`。
+`brief_id` 必须属于当前项目。`live=false` 使用确定性本地组合器；`live=true` 使用服务端模型并
+受路由策略约束，未配置模型返回 `422 model_configuration_error`。
+母稿标题优先级为：创建请求显式 `title` > `brief.selected_title` > `brief.title`。
 已保存的非空 `structure_override` 按其顺序整体替代配方默认章节。创建成功后同时写入母稿和
-第一个不可变版本。
+第一个不可变版本，同时返回 `execution`；首个版本保存该执行来源。
 
 ### 列表与分块读取
 
@@ -398,7 +440,10 @@ GET /api/v2/projects/PROJECT_ID/assets?status=draft&content_type=周报&limit=20
 GET /api/v2/projects/PROJECT_ID/assets/ASSET_ID?revision=1&chunk_offset=0&chunk_size=8000
 ```
 
-`status` 为 `draft`、`reviewed`、`final` 或 `archived`。省略 `revision` 时读取当前版本。
+`status` 为 `draft`、`reviewed`、`final` 或 `archived`。省略 `revision` 时读取当前版本。资产读取
+响应顶层 `execution` 来自所选版本，版本列表中的 `Revision.execution` 也返回同一可选对象。
+手工修订及缺少执行记录的历史版本为 `null`；当前服务端配置、路由画像或版本说明不用于猜测
+历史型号。
 
 ### 保存新版本
 
@@ -446,6 +491,8 @@ GET /api/v2/projects/PROJECT_ID/assets/ASSET_ID/revisions?limit=20&offset=0
 ```
 
 变体作为独立资产保存，并通过 `parent_asset_id` 关联母稿；省略 `source_revision` 时使用当前版本。
+`live` 默认 `false`，显式 `true` 只调用服务端模型；响应和首个版本记录变体本次的 `execution`，
+不沿用母稿的模型来源。
 
 ### 六维审校
 
@@ -462,7 +509,7 @@ GET /api/v2/projects/PROJECT_ID/assets/ASSET_ID/revisions?limit=20&offset=0
 
 `checks` 映射为事实与证据、逻辑与结构、清晰与简洁、受众与语气、语言与规范、格式与交付维度；
 响应只返回并评分本次所选维度。`live=false` 使用本地确定性审校，`live=true` 才请求服务端模型
-增强。响应含 `effective_mode`、`resolved_route`、`requested_model_profile_id` 与
+增强。响应含 `execution`、`effective_mode`、`resolved_route`、`requested_model_profile_id` 与
 `model_issue_count`。审校响应与正文分开；采纳修改后用版本端点保存新快照。
 
 ### 导出与下载
@@ -554,7 +601,7 @@ POST /api/v2/projects/PROJECT_ID/academic/bibliography
 
 ### 标题、提纲、摘要、完整性与审稿回复
 
-这组端点共享研究简报字段：`title`、`research_question`，以及可选的 `discipline`、`purpose`、
+标题、提纲和摘要端点共享研究简报字段：`title`、`research_question`，以及可选的 `discipline`、`purpose`、
 `audience`、`document_type`、`language`、`keywords`、`constraints`、`method_notes`、`record_ids`。
 
 ```text
@@ -571,6 +618,29 @@ POST /api/v2/projects/PROJECT_ID/academic/rebuttal
   `manuscript_max_words` 和 `custom_rules`；响应同时返回 `manuscript_characters`、混合语言
   计词的 `manuscript_words` 与 `journal_profile_id`；
 - 审稿回复需要 `comments`，可用 `changes` 映射每条意见对应的实际修改。
+
+提纲根据 `ResearchBrief.document_type` 选择任务结构，响应 `outline.task_type` 是下列五个值之一：
+
+| 文种示例 | `outline.task_type` | 默认章节 |
+| --- | --- | --- |
+| 文献综述 | `literature-review` | 问题与范围、主题脉络、证据与分歧、研究空白 |
+| 研究提纲 / 研究计划 | `research-outline` | 研究问题、分析框架、资料与方法、章节结构 |
+| 摘要 / 论文摘要 / 研究摘要 | `abstract` | 背景与目的、方法、结果、结论 |
+| 审稿回复 / 审稿意见回复 | `rebuttal` | 总体说明、逐条回复、修改定位、保留意见 |
+| 通用研究论文及其他未映射文种 | `research-paper` | 引言、文献综述、研究设计、研究发现、讨论、结论 |
+
+`abstract.task_type` 固定为 `abstract`。页面摘要任务调用已有 `/academic/abstract`，审稿回复
+调用 `/academic/rebuttal`，不再把二者作为普通六章论文提纲展示。`task_type` 是响应中的任务
+标识，不是新增请求字段；输入仍通过 `document_type` 选择任务。领域函数
+`create_outline(..., journal=...)` 支持以非空 `journal.required_sections` 覆盖默认章节，当前
+HTTP/MCP 提纲请求未暴露该 `journal` 参数；完整性检查的 `journal` 契约保持如上。
+
+当浏览器把已导入书目与证据汇总为学术材料包并用于项目母稿时，组合器优先处理标注的原文
+证据块。本地组合时 480 字符上限只截取证据正文，文献 ID、证据 ID 标记及材料包中已有的完整
+定位行独立保留。截断正文前单列“下文已截断，不代表完整引文；请回查原始证据及上下文。”
+提示，与原文明确分开。包说明和书目清单不当作正文论证；真实模型提示将书目放在独立
+`bibliographic_metadata`，与事实 `knowledge` 分开。
+该字段是内部模型上下文结构，不是公开 HTTP 请求的新字段。仅有元数据时继续保留待补证据提示。
 
 字段结构、数量限制和引用真实性边界见 [学术写作指南](academic-writing.md) 与
 [MCP 完整契约](gongwen-mcp.md)。HTTP 与 MCP 调用同一应用服务和项目数据库。
@@ -604,6 +674,18 @@ v0.2 页面保留下列扁平路径，便于渐进升级。新集成优先使用
 - 真实模型、文章来源与学术元数据请求在 SQLite 事务外执行，结果通过短事务写入。
 - v0.1 `/api/*` 继续服务原公文页面与自动化，包括健康/就绪、方法论、拟题、生成、改写、审校、
   事实审校、模型连接、文稿/版本、文章来源和 DOCX/批量导出。
+
+兼容单篇生成、拟题、改写和审校现按文种使用相应场景指引。`POST /api/rewrite` 的
+`RewriteRequest` 新增可选 `document_type`，最多 100 字符，默认空字符串；建议页面和客户端
+传当前成果类型，使润色保持学术、职场、传播或公文的表达目标。未给出文种的自由文本改写使用
+中性职场场景，既有请求字段和响应结构继续兼容。
+`POST /api/review` 已有的 `document_type` 同样用于选择场景审校重点；学术核对问题、方法和
+引用，职场核对结论和行动项，传播核对事实与表达边界，而非统一套用公文检查项。
+
+浏览器资料选择按项目与场景绑定。生成、材料同步、文献读取等请求发起后若切换上下文，客户端
+须丢弃不再匹配当前项目、场景和输入的迟到响应；服务端项目隔离并不代替这项界面一致性检查。
+学术任务可使用本项目已关联书目、导入原文或正文摘录；书目元数据不是全文阅读记录，研究证据
+缺失时保留待补标记。党政样文只用于对应公文写法参考，不作为学术论断的默认依据。
 
 两套 API 使用同一 Web Token、中间件和数据目录；旧路径保持原请求/响应语义。部署、数据迁移与
 回退步骤见 [运维手册](operations.md)。

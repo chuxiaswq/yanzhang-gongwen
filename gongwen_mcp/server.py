@@ -405,8 +405,8 @@ def create_server(
 
     @server.tool(
         name="gongwen_rewrite_text",
-        title="改写公文文本",
-        description="按润色、压缩、扩写或自定义要求改写一段公文文本。",
+        title="按场景改写文本",
+        description="按文种对应的公文、职场、传播或学术语域润色、压缩或扩写文本。",
         annotations=model_operation,
     )
     async def gongwen_rewrite_text(
@@ -415,11 +415,13 @@ def create_server(
         mode: str = "polish",
         tone: str = "稳健规范",
         engine: EngineMode = "auto",
+        document_type: str = "",
     ) -> dict[str, object]:
         return await runtime.tools().gongwen_rewrite_text(
             _request(
                 RewriteTextRequest,
                 text=text,
+                document_type=document_type,
                 instruction=instruction,
                 mode=mode,
                 tone=tone,

@@ -299,9 +299,9 @@ def test_candidate_engine_scores_the_full_catalog_before_truncation() -> None:
     batch = generate_candidates(CandidateRequest(brief=_brief(), kind="title", count=5))
     formula_ids = [candidate.formula_id for candidate in batch.candidates]
 
-    # ``action`` is after the first five catalog entries. It reaches the top five
-    # only when every eligible formula is scored before the count limit is applied.
-    assert "action" in formula_ids
+    # ``audience`` is after the first five workplace catalog entries. It reaches
+    # the top five only when the full scene catalog is scored before truncation.
+    assert "audience" in formula_ids
     assert "parallel-triad" in formula_ids
     assert all(candidate.formula_name for candidate in batch.candidates)
     assert all(candidate.techniques for candidate in batch.candidates)
@@ -364,9 +364,10 @@ async def test_local_composer_normalizes_constraint_terminal_punctuation() -> No
     assert all("。；" not in paragraph for paragraph in paragraphs)
     assert all("；；" not in paragraph for paragraph in paragraphs)
     assert all("！！" not in paragraph for paragraph in paragraphs)
-    assert all(
-        paragraph.endswith("写作时同时遵循：所有数字须有来源；标题结构保持平行；按期交付。")
-        for paragraph in paragraphs
+    assert all("写作时同时遵循" not in paragraph for paragraph in paragraphs)
+    constraint_blocks = tuple(block.text for block in draft.blocks if block.kind == "callout")
+    assert constraint_blocks == (
+        "写作约定（交付前核对）：所有数字须有来源；标题结构保持平行；按期交付。",
     )
 
 

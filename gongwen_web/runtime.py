@@ -302,6 +302,9 @@ class RuntimeSettings:
             "server_provider_configured": self.server_provider_configured,
             "provider_name": provider.name if provider is not None else None,
             "default_model": provider.model if provider is not None else None,
+            "default_mode": "demo",
+            "demo_engine": "deterministic",
+            "demo_uses_model": False,
         }
 
 

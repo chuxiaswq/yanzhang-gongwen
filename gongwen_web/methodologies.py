@@ -16,7 +16,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-_NUMBERED_HEADING = re.compile(r"^(?:[一二三四五六七八九十]{1,3}|\d{1,2})[、.]\s*")
+from yanzhang_core.packs import list_recipes
+
+_NUMBERED_HEADING = re.compile(
+    r"^(?:(?:[一二三四五六七八九十]{1,3}|\d{1,2})[、.]|"
+    r"[（(](?:[一二三四五六七八九十]{1,3}|\d{1,2})[）)])\s*"
+)
 
 
 class CatalogModel(BaseModel):
@@ -421,7 +426,7 @@ CONTENT_METHODOLOGIES: tuple[ContentMethodologyDefinition, ...] = (
     ContentMethodologyDefinition(
         id="universal-problem-solving",
         name="现状—问题—对策—保障分析法",
-        applicable_document_types=(*_ALL_TYPES, "*"),
+        applicable_document_types=_ALL_TYPES,
         summary="适合问题导向明显的综合材料，以诊断推动解决方案落地。",
         logic="描述现状 → 定位问题 → 提出对策 → 建立保障",
         headings=("一、总体情况", "二、主要问题", "三、重点举措", "四、保障机制"),
@@ -497,6 +502,142 @@ _DEFAULT_CONTENT_METHODOLOGY: dict[str, str] = {
 }
 
 
+# Recipes are the single source for section semantics across the web and MCP surfaces.
+_RECIPE_METHODS = tuple(
+    ContentMethodologyDefinition(
+        id=f"recipe-{recipe.id}",
+        name=recipe.name,
+        applicable_document_types=(recipe.content_type,),
+        summary=recipe.summary,
+        logic=" → ".join(section.title for section in recipe.sections),
+        headings=tuple(section.title for section in recipe.sections),
+        section_purposes=tuple(section.purpose for section in recipe.sections),
+        fact_strategy=recipe.fact_strategy,
+    )
+    for recipe in list_recipes()
+)
+CONTENT_METHODOLOGIES += (
+    *_RECIPE_METHODS,
+    ContentMethodologyDefinition(
+        id="generic-evidence-structure",
+        name="目标—要点—依据—结论",
+        applicable_document_types=("*",),
+        summary="为自定义文字任务提供中性的内容组织方式。",
+        logic="明确任务 → 展开要点 → 核对依据 → 形成结论",
+        headings=("背景与目标", "核心内容", "依据与边界", "结论与后续"),
+        section_purposes=(
+            "说明写作对象和目的",
+            "围绕核心问题组织材料",
+            "区分事实、判断和信息缺口",
+            "总结重点并说明后续事项",
+        ),
+        fact_strategy="只使用用户材料中的事实；缺少的具体信息保留待补项。",
+    ),
+)
+for _recipe in list_recipes():
+    _DEFAULT_CONTENT_METHODOLOGY.setdefault(_recipe.content_type, f"recipe-{_recipe.id}")
+
+_SCENARIO_TITLE_PATTERNS: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "workplace": (
+        ("事项直达式", "{topic}｜{document_type}", "直接标识事项与内容类型，方便协作检索。"),
+        ("沟通目标式", "{topic}：{purpose}", "主题连接沟通目的，不添加未经确认的结论。"),
+        ("信息同步式", "{topic}：进展与待确认事项", "清楚区分已经确认的信息和仍需沟通的事项。"),
+        ("行动协作式", "{topic}：下一步与协作要点", "让收件人看到行动与协作重点。"),
+        ("问题决策式", "{topic}：问题、选项与建议", "围绕问题和决策组织标题，而非使用部署口号。"),
+    ),
+    "media": (
+        ("主题直陈式", "{topic}", "直接呈现主题，不预设尚未证实的效果。"),
+        ("事实解读式", "{topic}：关键事实与背景", "区分事件事实和背景解读。"),
+        ("读者问题式", "关于{topic}，有哪些信息值得关注？", "以真实问题引入，不制造夸张结论。"),
+        ("内容预告式", "一起了解{topic}", "自然邀请阅读，适合内容传播。"),
+        ("焦点解释式", "聚焦{topic}：从事实到理解", "围绕单一主题展开解释。"),
+    ),
+    "academic": (
+        (
+            "主题研究式",
+            "{topic}：{document_type}",
+            "明确研究主题和稿件性质，不宣称未经证实的发现。",
+        ),
+        ("问题范围式", "{topic}的研究问题与范围", "标识研究对象和问题边界。"),
+        ("证据分析式", "{topic}：证据、方法与讨论", "围绕证据和方法组织标题，不使用宣传性措辞。"),
+        ("进展述评式", "{topic}研究进展与述评", "适用于有真实文献材料支撑的研究述评。"),
+        ("概念框架式", "{topic}：概念界定与分析框架", "聚焦概念及分析路径，不虚构实验或因果结果。"),
+    ),
+}
+_RECIPE_TITLE_PATTERNS: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "work-email": (
+        ("事项请求式", "{topic}｜请确认", "直接说明需要收件人确认的事项。"),
+        ("事项同步式", "{topic}｜信息同步", "说明本封邮件用于信息同步。"),
+        ("反馈沟通式", "{topic}｜沟通与反馈", "明确沟通主题，不虚构期限和承诺。"),
+        ("简明主题式", "{topic}", "保持邮件主题简短清晰。"),
+        ("行动说明式", "{topic}｜下一步安排", "用具体事项引出后续动作。"),
+    ),
+    "weekly-report": (
+        ("周报归档式", "{topic}周报", "标明工作范围与周报类型。"),
+        ("进展风险式", "{topic}：本周进展与风险", "同时呈现进展和需要关注的风险。"),
+        ("完成计划式", "{topic}：本周完成与下周计划", "区分已完成成果与后续计划。"),
+        ("协作同步式", "{topic}工作同步", "适合团队快速查阅。"),
+        ("事项状态式", "{topic}：成果、阻塞与下一步", "围绕状态和下一步协作展开。"),
+    ),
+    "business-proposal": (
+        ("业务方案式", "{topic}业务方案", "明确业务对象和材料类型。"),
+        ("问题方案式", "{topic}：问题与解决路径", "将业务问题与可执行路径相连接。"),
+        ("目标路径式", "{topic}：目标、方案与评估", "突出目标、方案和验证方式。"),
+        ("选项比较式", "{topic}：方案比较与选择建议", "适合需要决策和取舍的材料。"),
+        ("实施评估式", "{topic}：实施路径与风险评估", "同时考虑落地条件与风险。"),
+    ),
+    "research-abstract": (
+        ("摘要标识式", "{topic}：研究摘要", "准确说明这是研究摘要。"),
+        ("主题简洁式", "{topic}", "保留研究主题，避免夸大成果。"),
+        ("摘要说明式", "{topic}的研究摘要", "指向原文研究，不新增发现。"),
+        ("结构化摘要式", "{topic}：结构化摘要", "按目的、方法、结果和结论组织。"),
+        ("研究概述式", "{topic}：研究概述", "概述原文及研究边界。"),
+    ),
+    "reviewer-response": (
+        ("审稿回复式", "{topic}：审稿意见回复", "明确回复对象和稿件主题。"),
+        ("逐条答复式", "关于{topic}的逐条审稿回复", "保持尊重且逐条回应意见。"),
+        ("修改说明式", "{topic}：修改说明与回复", "关联实际修改与回复理由。"),
+        ("修订对照式", "{topic}：审稿意见与修订对照", "便于核对意见、回应和修改位置。"),
+        ("回应汇总式", "{topic}审稿回应", "简明标识材料用途。"),
+    ),
+}
+for _recipe in list_recipes():
+    if _recipe.pack_id == "gongwen":
+        continue
+    _patterns = _RECIPE_TITLE_PATTERNS.get(_recipe.id, _SCENARIO_TITLE_PATTERNS[_recipe.pack_id])
+    _ids: list[str] = []
+    for _index, (_name, _template, _principle) in enumerate(_patterns, 1):
+        _id = f"{_recipe.pack_id}-{_recipe.id}-{_index}"
+        _ids.append(_id)
+        TITLE_FORMULAS += (
+            TitleFormulaDefinition(
+                id=_id,
+                name=_name,
+                applicable_document_types=(_recipe.content_type,),
+                template=_template,
+                style=_name,
+                principle=_principle,
+                base_priority=100 if _index == 1 else 94 - _index,
+            ),
+        )
+    _DEFAULT_TITLE_FORMULAS[_recipe.content_type] = tuple(_ids)
+
+# Unknown custom types get useful neutral choices instead of official-document slogans.
+for _index, (_name, _template, _principle) in enumerate(_SCENARIO_TITLE_PATTERNS["workplace"], 1):
+    TITLE_FORMULAS += (
+        TitleFormulaDefinition(
+            id=f"neutral-{_index}",
+            name=_name,
+            applicable_document_types=("*",),
+            template=_template,
+            style=_name,
+            principle=_principle,
+            base_priority=95 - _index,
+        ),
+    )
+_NEUTRAL_FORMULA_IDS = tuple(f"neutral-{index}" for index in range(1, 6))
+
+
 def normalize_document_type(value: str) -> str:
     """Normalize common UI aliases without rejecting future custom types."""
 
@@ -507,6 +648,17 @@ def normalize_document_type(value: str) -> str:
         "方案": "实施方案",
         "讲话": "讲话稿",
         "汇报": "汇报材料",
+        "工作邮件": "邮件",
+        "职场邮件": "邮件",
+        "商业方案": "业务方案",
+        "学术论文": "研究提纲",
+        "论文": "研究提纲",
+        "研究论文": "研究提纲",
+        "期刊论文": "研究提纲",
+        "开题报告": "研究提纲",
+        "论文摘要": "摘要",
+        "研究摘要": "摘要",
+        "社交文案": "社交媒体文案",
     }
     return aliases.get(normalized, normalized)
 
@@ -532,7 +684,7 @@ def title_formulas_for(
     if not ids:
         ids = _DEFAULT_TITLE_FORMULAS.get(
             normalized_type,
-            ("generic-elements",),
+            _NEUTRAL_FORMULA_IDS,
         )
     formulas: list[TitleFormulaDefinition] = []
     for formula_id in ids:
@@ -551,7 +703,7 @@ def default_title_formula_ids(document_type: str) -> tuple[str, ...]:
     """Return the ordered built-in title formulas for a document type."""
 
     normalized = normalize_document_type(document_type)
-    return _DEFAULT_TITLE_FORMULAS.get(normalized, ("generic-elements",))
+    return _DEFAULT_TITLE_FORMULAS.get(normalized, _NEUTRAL_FORMULA_IDS)
 
 
 def content_methodology(methodology_id: str) -> ContentMethodologyDefinition:
@@ -568,7 +720,7 @@ def default_content_methodology_id(document_type: str) -> str:
     """Return the default method id for the normalized document type."""
 
     normalized = normalize_document_type(document_type)
-    return _DEFAULT_CONTENT_METHODOLOGY.get(normalized, "universal-problem-solving")
+    return _DEFAULT_CONTENT_METHODOLOGY.get(normalized, "generic-evidence-structure")
 
 
 def resolve_content_methodology(
@@ -653,7 +805,12 @@ def methodology_catalog(document_type: str | None = None) -> MethodologyCatalog:
         for formula in TITLE_FORMULAS
         if normalized_type is None
         or normalized_type in formula.applicable_document_types
-        or "*" in formula.applicable_document_types
+        or (
+            "*" in formula.applicable_document_types
+            and not (
+                formula.id.startswith("neutral-") and normalized_type in _DEFAULT_TITLE_FORMULAS
+            )
+        )
     )
     methods = tuple(
         method

@@ -40,6 +40,9 @@ ReviewCategory = Literal[
     "method",
 ]
 LinkStatus = Literal["verified", "needs-review", "invalid"]
+ResearchTaskType = Literal[
+    "literature-review", "research-outline", "abstract", "rebuttal", "research-paper"
+]
 
 
 class AcademicModel(BaseModel):
@@ -380,6 +383,7 @@ class AcademicOutline(AcademicModel):
     """Structured manuscript plan tied to imported records."""
 
     title: str
+    task_type: ResearchTaskType = "research-paper"
     sections: list[OutlineSection]
     record_ids: list[str] = Field(default_factory=list)
 
@@ -396,6 +400,7 @@ class AbstractDraft(AcademicModel):
     """Evidence-bounded abstract draft and its source lineage."""
 
     text: str
+    task_type: Literal["abstract"] = "abstract"
     record_ids: list[str] = Field(default_factory=list)
     claim_ids: list[str] = Field(default_factory=list)
     placeholders: list[str] = Field(default_factory=list)

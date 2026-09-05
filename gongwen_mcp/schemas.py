@@ -134,6 +134,7 @@ class GenerateDocumentRequest(_WritingContext):
 
 
 class RewriteTextRequest(MCPModel):
+    document_type: str = Field(default="", max_length=100)
     text: str = Field(min_length=1, max_length=100_000)
     instruction: str = Field(default="提升表达的规范性、准确性和凝练度", max_length=2_000)
     mode: str = Field(default="polish", max_length=80)
